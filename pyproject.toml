@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "az-voice"
+version = "0.1.0"
+description = "Text preprocessing, TTS, and ASR toolkit for English and Chinese"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10,<3.13"
+authors = [
+    { name = "Andrew Zhu", email = "andrew@azpal.dev" },
+]
+keywords = ["tts", "asr", "speech", "text-preprocessing", "chinese", "english"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "requests>=2.31",
+    "numpy>=1.24",
+    "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+voxcpm = ["voxcpm>=2.0"]
+higgs = []  # Higgs Audio v3 served via SGLang-Omni — use API client
+asr = []    # ASR backends (Whisper, FunASR/Paraformer, Vosk)
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+all = ["az-voice[voxcpm,asr,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/xhinker/az-voice"
+Documentation = "https://github.com/xhinker/az-voice#readme"
+Repository = "https://github.com/xhinker/az-voice.git"
+Issues = "https://github.com/xhinker/az-voice/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
