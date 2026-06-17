@@ -4,16 +4,16 @@ Prerequisites:
     pip install voxcpm>=2.0 torch torchaudio soundfile
 
 Usage:
-    # Basic TTS
+    # Basic TTS on default GPU (cuda:0)
     python experiments/voxcpm2_inference.py --text "Hello, this is a test of VoxCPM2."
 
     # Voice design (no reference audio needed)
-    python experiments/voxcpm2_inference.py \\
+    python experiments/voxcpm2_inference.py \
         --text "(A young woman, gentle voice) Hello there!"
 
     # Voice cloning from reference audio
-    python experiments/voxcpm2_inference.py \\
-        --text "This is a cloned voice speaking." \\
+    python experiments/voxcpm2_inference.py \
+        --text "This is a cloned voice speaking." \
         --reference-wav path/to/speaker.wav
 
 Requirements:
@@ -22,6 +22,7 @@ Requirements:
 """
 
 import argparse
+import os
 from pathlib import Path
 
 import soundfile as sf
@@ -34,13 +35,24 @@ def main():
     parser.add_argument("--prompt-text", type=str, default=None, help="Transcript of the reference audio (for ultimate cloning)")
     parser.add_argument("--output", "-o", type=str, default="voxcpm2_output.wav", help="Output WAV file path")
     parser.add_argument("--model-name", type=str, default="openbmb/VoxCPM2", help="Model name or local path")
+    parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on (default: cuda:0). Use CUDA_VISIBLE_DEVICES env var to select GPU.")
     parser.add_argument("--cfg-value", type=float, default=2.0, help="Classifier-free guidance scale (higher = more expressive)")
     parser.add_argument("--inference-timesteps", type=int, default=10, help="Diffusion steps (fewer = faster, 7-15 recommended)")
     args = parser.parse_args()
 
+    # Set model cache directory to local models folder
+    script_dir = Path(__file__).resolve().parent.parent
+    model_cache_dir = str(script_dir / "models")
+    os.environ["HF_HOME"] = model_cache_dir  # Override HuggingFace default cache location
+
     print(f"Loading model: {args.model_name}")
     from voxcpm import VoxCPM
-    model = VoxCPM.from_pretrained(args.model_name, load_denoiser=False)
+    model = VoxCPM.from_pretrained(
+        args.model_name,
+        load_denoiser=False,
+        cache_dir=model_cache_dir,  # Save to models/ folder instead of ~/.cache/huggingface
+        # VoxCPM auto-detects device; use CUDA_VISIBLE_DEVICES env var or model.to() after load
+    )
 
     kwargs = {
         "text": args.text,
