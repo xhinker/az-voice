@@ -33,7 +33,7 @@ def main():
     parser.add_argument("--text", type=str, required=True, help="Text to synthesize (can include voice design in parentheses)")
     parser.add_argument("--reference-wav", type=str, default=None, help="Path to reference audio for cloning")
     parser.add_argument("--prompt-text", type=str, default=None, help="Transcript of the reference audio (for ultimate cloning)")
-    parser.add_argument("--output", "-o", type=str, default="voxcpm2_output.wav", help="Output WAV file path")
+    parser.add_argument("--output", "-o", type=str, default="outputs/voxcpm2_output.wav", help="Output WAV file path")
     parser.add_argument("--model-name", type=str, default="openbmb/VoxCPM2", help="Model name or local path")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on (default: cuda:0). Use CUDA_VISIBLE_DEVICES env var to select GPU.")
     parser.add_argument("--cfg-value", type=float, default=2.0, help="Classifier-free guidance scale (higher = more expressive)")
