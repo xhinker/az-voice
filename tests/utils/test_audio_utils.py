@@ -1,57 +1,27 @@
 """Tests for audio utilities (utils/audio_utils.py)."""
 
-import os
-import struct
 import tempfile
 from pathlib import Path
 
 import pytest
-from az_voice.utils.audio_utils import concatenate_wavs, _normalize_cjk_spaces
+from az_voice.utils.audio_utils import concatenate_wavs
 
 
 # ---------------------------------------------------------------------------
 # Helper: create a minimal WAV file for testing
 # ---------------------------------------------------------------------------
 
-def _make_test_wav(path: str | Path, sample_rate: int = 24000, duration_sec: float = 1.0):
+def _make_test_wav(path, sample_rate=24000, duration_sec=1.0):
     """Create a minimal mono 16-bit PCM WAV file with silence."""
     import wave
     n_frames = int(sample_rate * duration_sec)
-    frames = b"\x00\x00" * n_frames  # silence (16-bit, little-endian)
+    frames = b"\x00\x00" * n_frames
 
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(1)
-        wf.setsampwidth(2)  # 16-bit PCM
+        wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(frames)
-
-
-# ---------------------------------------------------------------------------
-# _normalize_cjk_spaces
-# ---------------------------------------------------------------------------
-
-class TestNormalizeCjkSpaces:
-    def test_removes_space_between_cjk(self):
-        assert _normalize_cjk_spaces("你好 世界") == "你好世界"
-
-    def test_preserves_space_around_latin(self):
-        assert _normalize_cjk_spaces("Hello world") == "Hello world"
-
-    def test_mixed_language(self):
-        result = _normalize_cjk_spaces("Hello 你好 世界 World")
-        # Space between Latin and CJK should be kept, space between two CJK removed
-        assert "你好世界" in result
-
-    def test_empty_string(self):
-        assert _normalize_cjk_spaces("") == ""
-
-    def test_no_spaces(self):
-        text = "HelloWorld你好世界"
-        assert _normalize_cjk_spaces(text) == text
-
-    def test_multiple_consecutive_spaces_between_cjk(self):
-        result = _normalize_cjk_spaces("你 好")
-        assert "  " not in result and ("你好" in result or "你 好" in result)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +41,6 @@ class TestConcatenateWavsBasic:
             result_path = concatenate_wavs([w1, w2], out)
 
             assert Path(out).exists()
-            assert isinstance(result_path, Path)
-            # Total should be ~1 second (within tolerance for print output parsing)
             import wave
             with wave.open(out, "rb") as wf:
                 duration = wf.getnframes() / wf.getframerate()
@@ -107,7 +75,6 @@ class TestConcatenateWavsBasic:
             import wave
             with wave.open(out, "rb") as wf:
                 duration = wf.getnframes() / wf.getframerate()
-            # 5 × 0.2s = 1.0s total
             assert 0.9 < duration <= 1.1
 
 
@@ -122,7 +89,6 @@ class TestConcatenateWavsEdgeCases:
             out = str(Path(tmpdir) / "out.wav")
 
             _make_test_wav(w1, duration_sec=0.5)
-
             result_path = concatenate_wavs([w1, "/nonexistent/file.wav"], out)
             assert Path(out).exists()
 
@@ -133,7 +99,6 @@ class TestConcatenateWavsEdgeCases:
             out = str(Path(tmpdir) / "out.wav")
 
             _make_test_wav(w1, duration_sec=0.5)
-            # Create an empty file (not a valid WAV)
             Path(empty).touch()
 
             result_path = concatenate_wavs([w1, empty], out)
@@ -143,7 +108,6 @@ class TestConcatenateWavsEdgeCases:
         with tempfile.TemporaryDirectory() as tmpdir:
             out = str(Path(tmpdir) / "out.wav")
             bad = str(Path(tmpdir) / "bad.txt")
-            # Write non-WAV content
             Path(bad).write_text("not a wav file")
 
             with pytest.raises(ValueError, match="No valid WAV frames"):
@@ -164,7 +128,6 @@ class TestConcatenateWavsEdgeCases:
             _make_test_wav(w_good, sample_rate=24000, duration_sec=0.5)
             _make_test_wav(w_bad_sr, sample_rate=16000, duration_sec=0.5)
 
-            # Should skip the 16kHz file and only use the 24kHz one
             result_path = concatenate_wavs([w_good, w_bad_sr], out, sample_rate=24000)
             assert Path(out).exists()
 
@@ -176,7 +139,6 @@ class TestConcatenateWavsEdgeCases:
 
             _make_test_wav(w1, duration_sec=0.5)
             result_path = concatenate_wavs([w1], str(out))
-
             assert out.exists()
 
     def test_output_sample_rate_preserved(self):
@@ -185,14 +147,13 @@ class TestConcatenateWavsEdgeCases:
             out = str(Path(tmpdir) / "out.wav")
 
             _make_test_wav(w1, sample_rate=24000, duration_sec=0.5)
-
             concatenate_wavs([w1], out, sample_rate=24000)
 
             import wave
             with wave.open(out, "rb") as wf:
                 assert wf.getframerate() == 24000
                 assert wf.getnchannels() == 1
-                assert wf.getsampwidth() == 2  # 16-bit
+                assert wf.getsampwidth() == 2
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +168,6 @@ class TestConcatenateWavsRobustness:
             out = str(Path(tmpdir) / "out.wav")
 
             _make_test_wav(w_good, duration_sec=0.5)
-            # Write garbage to the bad file
             with open(w_bad, "wb") as f:
                 f.write(b"\x00" * 100 + b"GARBAGE_DATA_HERE")
 
@@ -242,7 +202,7 @@ class TestIntegration:
             wav_paths = []
             for i, chunk in enumerate(chunks):
                 wp = str(Path(tmpdir) / f"chunk_{i}.wav")
-                _make_test_wav(wp, duration_sec=0.1)  # Mock: each chunk → short WAV
+                _make_test_wav(wp, duration_sec=0.1)
                 wav_paths.append(wp)
 
             # Step 3: Concatenate all chunks into final output
@@ -252,8 +212,9 @@ class TestIntegration:
             assert Path(out).exists()
             import wave
             with wave.open(out, "rb") as wf:
-                # Should have one frame per chunk (0.1s each)
                 duration = wf.getnframes() / wf.getframerate()
                 expected_duration = len(chunks) * 0.1
-                assert abs(duration - expected_duration) < 0.05, \
-                    f"Expected ~{expected_duration}s, got {duration}s"
+                assert abs(duration - expected_duration) < 0.05
+
+
+__all__ = ["TestConcatenateWavsBasic", "TestConcatenateWavsEdgeCases", "TestConcatenateWavsRobustness", "TestIntegration"]

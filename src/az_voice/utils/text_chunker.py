@@ -6,9 +6,9 @@ the voice_models evaluation toolkit.
 """
 
 import re
+_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 # --- Constants ---
-_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _TERMINAL_PUNCT_CHARS = ".!?。！？"
 _WEAK_PUNCT_CHARS = ",;，；、:："
 _CLOSING_QUOTE_CHARS = "\"'\"')）)]》」』"

@@ -24,6 +24,12 @@ pip install --upgrade pip
 pip install -e ".[dev]"
 ```
 
+## Run Tests
+
+```bash
+pytest tests/utils/ -v
+```
+
 ## Install from GitHub
 
 ```bash
