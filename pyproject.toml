@@ -7,16 +7,16 @@ name = "az-voice"
 version = "0.1.0"
 description = "Text preprocessing, TTS, and ASR toolkit for English and Chinese"
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.10,<3.13"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
 authors = [
-    { name = "Andrew Zhu", email = "andrew@azpal.dev" },
+    { name = "Andrew Zhu", email = "xhinker@gmail.com" },
 ]
 keywords = ["tts", "asr", "speech", "text-preprocessing", "chinese", "english"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

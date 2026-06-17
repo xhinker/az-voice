@@ -1,4 +1,4 @@
-# az-voice
+# az-voice (in progress)
 
 Text preprocessing, TTS, and ASR toolkit for English and Chinese.
 
