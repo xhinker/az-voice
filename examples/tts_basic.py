@@ -5,4 +5,4 @@ Usage once implemented:
 """
 
 print("TODO: implement TTS examples")
-# from az_voice import TTSClient, prepare_for_tts
+# from az_voice import TTSClient, split_text_for_tts

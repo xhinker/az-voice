@@ -2,8 +2,15 @@
 
 __version__ = "0.1.0"
 
-# TODO: import public API when modules are implemented
-# from az_voice.text_utils import normalize_text, prepare_for_tts, ...
-# from az_voice.tts import TTSClient, TTSClientVoxCPMNative
+from az_voice.utils import split_text_for_tts, concatenate_wavs
 
-__all__ = []
+# TODO: import TTS clients when implemented
+# from az_voice.tts import TTSClient, TTSClientVoxCPM
+
+# TODO: import ASR clients when implemented
+# from az_voice.asr import WhisperClient, FunASRClient
+
+__all__ = [
+    "split_text_for_tts",
+    "concatenate_wavs",
+]
