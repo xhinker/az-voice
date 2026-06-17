@@ -14,7 +14,7 @@ _WEAK_PUNCT_CHARS = ",;，；、:："
 _CLOSING_QUOTE_CHARS = "\"'\"')）)]》」』"
 
 DEFAULT_MAX_WORDS = 28
-DEFAULT_TARGET_SECONDS = 12.0
+DEFAULT_TARGET_SECONDS = 15.0
 
 
 def _is_cjk_heavy(piece: str) -> bool:
