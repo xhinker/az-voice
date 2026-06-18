@@ -16,7 +16,7 @@ from pathlib import Path
 import soundfile as sf
 
 
-# Configuration - GPU device and model settings (edit here)
+# %% Configuration - GPU device and model settings (edit here)
 DEVICE = "cuda:1"  # Default cuda:1 (RTX 3090). Change to "cuda:0" for RTX 5090 if needed
 MODEL_NAME = "openbmb/VoxCPM2"
 
@@ -24,7 +24,8 @@ MODEL_NAME = "openbmb/VoxCPM2"
 script_dir = Path(__file__).resolve().parent.parent
 os.environ["HF_HOME"] = str(script_dir / "models")
 
-# Load model ONCE (run this cell first, then reuse for all demos)
+
+# %% Load model ONCE (run this cell first, then reuse for all demos)
 print(f"Loading {MODEL_NAME} on {DEVICE}...")
 from voxcpm import VoxCPM
 model = VoxCPM.from_pretrained(
@@ -42,7 +43,7 @@ outputs_dir.mkdir(parents=True, exist_ok=True)
 print(f"Ready. Sample rate: {sample_rate} Hz | Outputs saved to: {outputs_dir}")
 
 
-# Helper function - generate audio (reuses pre-loaded model)
+# %% Helper function - generate audio (reuses pre-loaded model)
 def generate_audio(
     text_input,
     output_wav_path="voxcpm2_sample.wav",  # Relative name only — caller prepends outputs_dir/
@@ -53,7 +54,13 @@ def generate_audio(
     target_seconds=15.0,
     max_words=28,
 ):
-    """Generate audio for text via chunking + synthesize + concatenate."""
+    """Generate audio for text via chunking + synthesize + concatenate.
+
+    Args:
+        reference_wav: Path to reference audio for cloning (used as prompt_wav_path).
+        reference_text: Transcript of reference audio (required when reference_wav is provided).
+            VoxCPM requires both prompt_wav_path AND prompt_text together, or neither.
+    """
     from az_voice.utils.text_chunker import split_text_for_tts
     segments = split_text_for_tts(text_input, max_words=max_words, target_seconds=target_seconds)
     if not segments:
@@ -75,10 +82,13 @@ def generate_audio(
             chunk_path = tmp.name
 
         kwargs = {"text": segment, "cfg_value": cfg_value, "inference_timesteps": inference_timesteps}
-        if reference_wav:
-            kwargs["reference_wav_path"] = reference_wav
-        if reference_text:
+        
+        # VoxCPM requires prompt_wav_path and prompt_text together (or neither)
+        if reference_wav is not None and reference_text is not None:
+            kwargs["prompt_wav_path"] = reference_wav  # Not reference_wav_path!
             kwargs["prompt_text"] = reference_text
+        elif reference_wav is not None:
+            print("WARNING: reference_wav provided without reference_text — voice cloning requires both. Using as basic TTS instead.")
 
         print(f"  [{i}/{len(segments)}] Generating...")
         wav = model.generate(**kwargs)
@@ -135,15 +145,15 @@ print("=== Voice Design ===")
 wav_path, duration = generate_audio(voice_design_text, output_wav_path="voice_design.wav")
 print(f"Done! {duration:.1f}s audio saved to {wav_path}")
 
-# %% Run: Voice Cloning - requires reference audio (uncomment and execute)
-ref_wav = "/home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav"  # Edit this path
-ref_text = "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
+# %% Run: Voice Cloning - requires BOTH reference WAV AND transcript (uncomment and execute)
+ref_wav = "/home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav"  # Edit this path to your reference audio
+ref_text = "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"  # Transcript of the reference audio (REQUIRED)
 print("=== Voice Cloning ===")
 wav_path, duration = generate_audio(
     clone_text,
     output_wav_path="voice_clone.wav",
     reference_wav=ref_wav,
-    reference_text=ref_text,
+    reference_text=ref_text,  # Must be provided together with ref_wav!
 )
 print(f"Done! {duration:.1f}s audio saved to {wav_path}")
 

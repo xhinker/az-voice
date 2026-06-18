@@ -32,7 +32,12 @@ def main():
     parser = argparse.ArgumentParser(description="VoxCPM2 inference demo")
     parser.add_argument("--text", type=str, required=True, help="Text to synthesize (can include voice design in parentheses)")
     parser.add_argument("--reference-wav", type=str, default=None, help="Path to reference audio for cloning")
-    parser.add_argument("--prompt-text", type=str, default=None, help="Transcript of the reference audio (for ultimate cloning)")
+    parser.add_argument(
+        "--prompt-text",
+        type=str,
+        default=None,
+        help="Transcript of --reference-wav; uses prompt conditioning when provided",
+    )
     parser.add_argument("--output", "-o", type=str, default="outputs/voxcpm2_output.wav", help="Output WAV file path")
     parser.add_argument("--model-name", type=str, default="openbmb/VoxCPM2", help="Model name or local path")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on (default: cuda:0). Use CUDA_VISIBLE_DEVICES env var to select GPU.")
@@ -59,11 +64,15 @@ def main():
         "cfg_value": args.cfg_value,
         "inference_timesteps": args.inference_timesteps,
     }
-    if args.reference_wav:
+    if args.prompt_text and not args.reference_wav:
+        parser.error("--prompt-text requires --reference-wav.")
+    if args.reference_wav and args.prompt_text:
+        kwargs["prompt_wav_path"] = args.reference_wav
+        kwargs["prompt_text"] = args.prompt_text
+        print(f"Using prompt audio with transcript: {args.reference_wav}")
+    elif args.reference_wav:
         kwargs["reference_wav_path"] = args.reference_wav
         print(f"Using reference audio: {args.reference_wav}")
-    if args.prompt_text:
-        kwargs["prompt_text"] = args.prompt_text
 
     print(f"\nSynthesizing ({len(args.text)} chars)...")
     wav = model.generate(**kwargs)
