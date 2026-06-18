@@ -11,11 +11,21 @@ Usage:
     CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
         --text "(A young woman, gentle voice) Hello there!"
 
-    # Voice cloning from reference audio + transcript
-    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \
-        --text "This is a cloned voice speaking." \
-        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \
-        --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。" 
+    # Voice cloning from reference audio + transcript (requires BOTH ref_wav AND ref_text)
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
+        --text "This is a cloned voice speaking using reference audio for maximum fidelity and natural prosody matching." \\
+        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \\
+        --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
+
+    # Long Chinese text (splits into chunks automatically)
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
+        --text "最后上来的是一个带蓝牙耳机的时髦女子，只见她袅袅娜娜地走到广告板前拿起笔来，在所有同事的回答之下又写了几个字：综上所述。贝贝立马惊了：太有才了！所有的人都殚思竭虑，企图找出最佳答案，可这位蓝牙女子轻轻巧巧的四个字便夺了头彩。这简直是太有水平了：既有点幽默，又有点闷骚的意味儿，叫人回味无穷禁不住拍案叫好。美眉们各自带着得意的神情，颇以自己的见解为傲，只等着杰克发言，期待他给大家来个精彩点评。" \\
+        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \\
+        --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
+        
+    # Long English text (splits into chunks automatically)
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
+        --text "That was the night I discovered what Seven could not do. I sat at my kitchen table, staring at a blank document. The literary magazine wanted another story by Friday. Seven had already outlined three plot structures, generated five opening paragraphs, and prepared a bibliography of references. All I had to do was pick one and say go. But I could not. Not because I did not trust Seven's writing - it was good, maybe better than anything I'd ever produced. But because the story was not mine. The ideas were not mine. The desire to write them was not mine."
 
 Requirements:
     - NVIDIA GPU with at least 8GB VRAM (model loads in ~4-5 GB bf16)
@@ -47,14 +57,17 @@ def generate_audio(
     script_dir = Path(__file__).resolve().parent.parent
     os.environ["HF_HOME"] = str(script_dir / "models")
 
-    # Ensure outputs directory exists
-    if not output_wav_path.startswith("/"):  # Relative path
-        outputs_dir = script_dir / "outputs"
-        outputs_dir.mkdir(parents=True, exist_ok=True)
-        full_output_path = outputs_dir / Path(output_wav_path).name
+    # Ensure outputs directory exists (always saves to repo/outputs/)
+    outputs_dir = script_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Resolve output path: absolute paths stay as-is; relative paths go into outputs/
+    out_path = Path(output_wav_path)
+    if out_path.is_absolute():
+        full_output_path = out_path
+        full_output_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        Path(output_wav_path).parent.mkdir(parents=True, exist_ok=True)
-        full_output_path = Path(output_wav_path)
+        full_output_path = outputs_dir / out_path.name  # Just use filename to avoid double prepending
 
     # Load model once
     print(f"Loading {model_name} on {device}...")
