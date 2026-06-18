@@ -17,16 +17,24 @@ Usage:
         --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \\
         --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
 
+    # Voice cloning with style/emotion control (no transcript required)
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \
+        --text "Hello, I can speak in different styles." \
+        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \
+        --control "speaking slowly, happy tone"
+
     # Long Chinese text (splits into chunks automatically)
     CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
         --text "最后上来的是一个带蓝牙耳机的时髦女子，只见她袅袅娜娜地走到广告板前拿起笔来，在所有同事的回答之下又写了几个字：综上所述。贝贝立马惊了：太有才了！所有的人都殚思竭虑，企图找出最佳答案，可这位蓝牙女子轻轻巧巧的四个字便夺了头彩。这简直是太有水平了：既有点幽默，又有点闷骚的意味儿，叫人回味无穷禁不住拍案叫好。美眉们各自带着得意的神情，颇以自己的见解为傲，只等着杰克发言，期待他给大家来个精彩点评。" \\
         --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \\
         --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
-        
-    # Long English text (splits into chunks automatically)
-    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
-        --text "That was the night I discovered what Seven could not do. I sat at my kitchen table, staring at a blank document. The literary magazine wanted another story by Friday. Seven had already outlined three plot structures, generated five opening paragraphs, and prepared a bibliography of references. All I had to do was pick one and say go. But I could not. Not because I did not trust Seven's writing - it was good, maybe better than anything I'd ever produced. But because the story was not mine. The ideas were not mine. The desire to write them was not mine."
 
+    # Long English text (splits into chunks automatically)
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \
+        --text "That was the night I discovered what Seven could not do. I sat at my kitchen table, staring at a blank document. The literary magazine wanted another story by Friday. Seven had already outlined three plot structures, generated five opening paragraphs, and prepared a bibliography of references. All I had to do was pick one and say go. But I could not. Not because I did not trust Seven's writing - it was good, maybe better than anything I'd ever produced. But because the story was not mine. The ideas were not mine. The desire to write them was not mine." \
+        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \
+        --control "speaking slowly, novel reading tone"
+        
 Requirements:
     - NVIDIA GPU with at least 8GB VRAM (model loads in ~4-5 GB bf16)
     - Linux/Ubuntu recommended for CUDA support
@@ -47,6 +55,7 @@ def generate_audio(
     device="cuda:0",
     reference_wav=None,
     reference_text=None,
+    control_instruction=None,
     cfg_value=2.0,
     inference_timesteps=10,
     target_seconds=15.0,
@@ -106,7 +115,11 @@ def generate_audio(
             kwargs["prompt_wav_path"] = reference_wav
             kwargs["prompt_text"] = reference_text
         elif reference_wav is not None:
-            print("WARNING: reference_wav provided without reference_text — voice cloning requires both. Using as basic TTS instead.")
+            # Reference audio without transcript allows style control via text parentheses or --control
+            if control_instruction is not None:
+                segment_with_control = f"({control_instruction}){segment}"
+                kwargs["text"] = segment_with_control
+            kwargs["reference_wav_path"] = reference_wav
 
         print(f"  [{i}/{len(segments)}] Generating...")
         wav = model.generate(**kwargs)
@@ -142,11 +155,17 @@ def main():
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on (default: cuda:0). Use CUDA_VISIBLE_DEVICES env var or change here.")
     parser.add_argument("--reference-wav", type=str, default=None, help="Path to reference audio for cloning")
     parser.add_argument("--reference-text", type=str, default=None, help="Transcript of reference audio (required when --reference-wav is provided)")
+    parser.add_argument("--control", type=str, default=None, help="Voice design/style control instruction (e.g., 'speaking slowly, happy tone'). Cannot be used with --reference-text.")
     parser.add_argument("--output", "-o", type=str, default="outputs/voxcpm2_output.wav", help="Output WAV file path")
     parser.add_argument("--model-name", type=str, default="openbmb/VoxCPM2", help="Model name or local path")
     parser.add_argument("--cfg-value", type=float, default=2.0, help="Classifier-free guidance scale (higher = more expressive)")
     parser.add_argument("--inference-timesteps", type=int, default=10, help="Diffusion steps (fewer = faster, 7-15 recommended)")
     args = parser.parse_args()
+
+    # Validate: --control cannot be used with --reference-text  
+    if args.control is not None and args.reference_text is not None:
+        print("ERROR: --control cannot be used together with --reference-text. Use either style control OR Hi-Fi cloning with transcript, but not both.")
+        return
 
     wav_path, duration = generate_audio(
         text_input=args.text,
@@ -155,6 +174,7 @@ def main():
         device=args.device,
         reference_wav=args.reference_wav,
         reference_text=args.reference_text,
+        control_instruction=args.control,
         cfg_value=args.cfg_value,
         inference_timesteps=args.inference_timesteps,
     )
