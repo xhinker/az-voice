@@ -1,11 +1,3 @@
-"""TTS (Text-to-Speech) module.
+from az_voice.tts.voxcpm2 import VoxCPM2Engine
 
-Planned backends:
-  - TTSClient          : OpenAI-compatible API client (any /v1/audio/speech endpoint)
-  - TTSClientVoxCPM    : Native voxcpm Python wrapper (voice design, cloning, streaming)
-"""
-
-# TODO: implement TTS clients
-
-
-__all__ = []
+__all__ = ["VoxCPM2Engine"]
