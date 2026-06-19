@@ -169,7 +169,10 @@ class VoxCPM2Engine:
 
             # Save first chunk as seed anchor for subsequent chunks (prevents drift)
             if i == 1 and len(segments) > 1:
-                seed_prompt_wav = wav
+                import tempfile
+                seed_fd, seed_prompt_wav = tempfile.mkstemp(suffix=".wav")
+                sf.write(seed_prompt_wav, wav, self._sample_rate)
+                os.close(seed_fd)
 
         # Concatenate chunks
         full_wav = np.concatenate(chunk_wavs, axis=0)
