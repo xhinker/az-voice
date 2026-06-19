@@ -6,6 +6,7 @@ Run:
 
 
 from az_voice.tts import VoxCPM2Engine
+from az_voice.utils.vram_utils import cleanup_model
 
 
 def main():
@@ -111,7 +112,7 @@ def main():
     print("=" * 60)
     print("Step 8: Cleanup")
     print("=" * 60)
-    engine.cleanup()
+    cleanup_model(model=engine._model, clear_vram_memory=True)
     print("Done! All audio files saved to outputs/ folder.")
 
 

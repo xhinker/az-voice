@@ -191,3 +191,4 @@ class VoxCPM2Engine:
         clear_vram()
 
         return full_wav, self._sample_rate
+
