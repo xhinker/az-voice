@@ -18,9 +18,9 @@ Usage:
         --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
 
     # Voice cloning with style/emotion control (no transcript required)
-    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \
-        --text "Hello, I can speak in different styles." \
-        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
+        --text "Hello, I can speak in different styles." \\
+        --reference-wav path/to/speaker.wav \\
         --control "speaking slowly, happy tone"
 
     # Long Chinese text (splits into chunks automatically)
@@ -30,11 +30,9 @@ Usage:
         --reference-text "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
 
     # Long English text (splits into chunks automatically)
-    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \
-        --text "That was the night I discovered what Seven could not do. I sat at my kitchen table, staring at a blank document. The literary magazine wanted another story by Friday. Seven had already outlined three plot structures, generated five opening paragraphs, and prepared a bibliography of references. All I had to do was pick one and say go. But I could not. Not because I did not trust Seven's writing - it was good, maybe better than anything I'd ever produced. But because the story was not mine. The ideas were not mine. The desire to write them was not mine." \
-        --reference-wav /home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav \
-        --control "speaking slowly, novel reading tone"
-        
+    CUDA_VISIBLE_DEVICES=1 python experiments/voxcpm2_inference.py \\
+        --text "That was the night I discovered what Seven could not do. I sat at my kitchen table, staring at a blank document. The literary magazine wanted another story by Friday. Seven had already outlined three plot structures, generated five opening paragraphs, and prepared a bibliography of references. All I had to do was pick one and say go. But I could not. Not because I did not trust Seven's writing - it was good, maybe better than anything I'd ever produced. But because the story was not mine. The ideas were not mine. The desire to write them was not mine."
+
 Requirements:
     - NVIDIA GPU with at least 8GB VRAM (model loads in ~4-5 GB bf16)
     - Linux/Ubuntu recommended for CUDA support
@@ -60,6 +58,7 @@ def generate_audio(
     inference_timesteps=10,
     target_seconds=15.0,
     max_words=28,
+    voice_anchor_strength=None,
 ):
     """Generate audio for text via chunking + synthesize + concatenate."""
     # Setup paths and cache location
@@ -104,6 +103,8 @@ def generate_audio(
 
     # Synthesize each chunk (model is already loaded in VRAM on configured device)
     chunk_paths = []
+    seed_prompt_wav = None  # Fixed-seed anchor from first generated chunk
+    
     for i, segment in enumerate(segments, start=1):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             chunk_path = tmp.name
@@ -114,6 +115,17 @@ def generate_audio(
         if reference_wav is not None and reference_text is not None:
             kwargs["prompt_wav_path"] = reference_wav
             kwargs["prompt_text"] = reference_text
+        
+        # Fixed-seed continuation: use first generated chunk as prompt anchor for subsequent chunks (prevents re-entry instability)
+        elif seed_prompt_wav is not None:
+            kwargs["prompt_wav_path"] = seed_prompt_wav
+            kwargs["prompt_text"] = segments[0]  # Use actual transcript of first segment, NOT control instruction
+        
+        # Apply voice anchor strength for long-form stability (blends reference latent features back during generation)
+        if voice_anchor_strength is not None:
+            kwargs["voice_anchor_strength"] = voice_anchor_strength
+            print(f"  [Voice anchor strength: {voice_anchor_strength}]")
+        
         elif reference_wav is not None:
             # Reference audio without transcript allows style control via text parentheses or --control
             if control_instruction is not None:
@@ -124,6 +136,11 @@ def generate_audio(
         print(f"  [{i}/{len(segments)}] Generating...")
         wav = model.generate(**kwargs)
         sf.write(chunk_path, wav, sample_rate)
+        
+        # Fixed-seed chunking: after first chunk, use it as stable prompt anchor for subsequent chunks (prevents drift)
+        if i == 1 and len(segments) > 1:
+            seed_prompt_wav = chunk_path
+
         duration = len(wav) / sample_rate
         chunk_paths.append(chunk_path)
         print(f"    -> {duration:.1f}s audio saved to {chunk_path}")
@@ -139,8 +156,8 @@ def generate_audio(
     with wave.open(str(full_output_path), "rb") as wf:
         total_duration = wf.getnframes() / wf.getframerate()
 
-    # Clean up chunk files
-    for cp in chunk_paths:
+    # Clean up chunk files (keep seed prompt if needed for debugging)
+    for cp in chunk_paths[1:] if len(chunk_paths) > 1 else chunk_paths:  # Keep first chunk for reference
         try:
             Path(cp).unlink()
         except OSError:
@@ -160,6 +177,7 @@ def main():
     parser.add_argument("--model-name", type=str, default="openbmb/VoxCPM2", help="Model name or local path")
     parser.add_argument("--cfg-value", type=float, default=2.0, help="Classifier-free guidance scale (higher = more expressive)")
     parser.add_argument("--inference-timesteps", type=int, default=10, help="Diffusion steps (fewer = faster, 7-15 recommended)")
+    parser.add_argument("--voice-anchor-strength", type=float, default=None, help="Voice anchor strength for long-form stability (0.0-1.0). Higher values stabilize speaker identity but may reduce expressiveness.")
     args = parser.parse_args()
 
     # Validate: --control cannot be used with --reference-text  
@@ -177,6 +195,7 @@ def main():
         control_instruction=args.control,
         cfg_value=args.cfg_value,
         inference_timesteps=args.inference_timesteps,
+        voice_anchor_strength=args.voice_anchor_strength,
     )
 
     print()
