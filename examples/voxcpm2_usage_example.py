@@ -16,7 +16,7 @@ def main():
 
     engine = VoxCPM2Engine(
         model_name="openbmb/VoxCPM2",
-        device="cuda:1",  # RTX 3090
+        device="cuda:1",
     )
     engine.load_model()
     print()
