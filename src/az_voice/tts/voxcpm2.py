@@ -29,6 +29,7 @@ import soundfile as sf
 import torch
 
 from az_voice.utils.text_chunker import split_text_for_tts
+from az_voice.utils.vram_utils import clear_vram, cleanup_model
 
 
 class VoxCPM2Engine:
@@ -86,7 +87,7 @@ class VoxCPM2Engine:
     def sample_rate(self) -> int:
         """Get model sample rate."""
         if self._sample_rate is None:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
+            raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
         return self._sample_rate
 
     def generate(
@@ -123,7 +124,7 @@ class VoxCPM2Engine:
             ValueError: If invalid parameter combination.
         """
         if not self.is_loaded:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
+            raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
 
         # Validate parameters
         if control_instruction is not None and reference_text is not None:
@@ -187,24 +188,6 @@ class VoxCPM2Engine:
             print(f"Saved: {out_path} ({len(full_wav) / self._sample_rate:.1f}s)")
 
         # Cleanup temp objects in VRAM
-        self._clear_vram()
+        clear_vram()
 
         return full_wav, self._sample_rate
-
-    def _clear_vram(self) -> None:
-        """Clear temporary objects from VRAM after generation."""
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    def cleanup(self) -> None:
-        """Unload model and free all VRAM memory."""
-
-        if self._model is not None:
-            del self._model
-            self._model = None
-            print("Model unloaded.")
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            print("VRAM cleared.")
