@@ -26,6 +26,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 import soundfile as sf
+import torch
+
+from az_voice.utils.text_chunker import split_text_for_tts
 
 
 class VoxCPM2Engine:
@@ -130,7 +133,6 @@ class VoxCPM2Engine:
             )
 
         # Split text into chunks
-        from az_voice.utils.text_chunker import split_text_for_tts
         segments = split_text_for_tts(text, max_words=max_words, target_seconds=target_seconds)
         if not segments:
             raise ValueError("No text segments to generate.")
@@ -163,13 +165,13 @@ class VoxCPM2Engine:
                     kwargs["text"] = f"({control_instruction}){segment}"
                 kwargs["reference_wav_path"] = reference_wav
 
-            # Generate chunk
-            wav = self._model.generate(**kwargs)
+            # Generate chunk (inference mode: no gradients, less VRAM)
+            with torch.inference_mode():
+                wav = self._model.generate(**kwargs)
             chunk_wavs.append(wav)
 
             # Save first chunk as seed anchor for subsequent chunks (prevents drift)
             if i == 1 and len(segments) > 1:
-                import tempfile
                 seed_fd, seed_prompt_wav = tempfile.mkstemp(suffix=".wav")
                 sf.write(seed_prompt_wav, wav, self._sample_rate)
                 os.close(seed_fd)
@@ -191,14 +193,12 @@ class VoxCPM2Engine:
 
     def _clear_vram(self) -> None:
         """Clear temporary objects from VRAM after generation."""
-        import torch
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     def cleanup(self) -> None:
         """Unload model and free all VRAM memory."""
-        import torch
 
         if self._model is not None:
             del self._model
