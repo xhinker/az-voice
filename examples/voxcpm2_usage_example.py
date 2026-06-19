@@ -1,7 +1,7 @@
 """VoxCPM2 usage example - demonstrates library API with all features.
 
 Run:
-    CUDA_VISIBLE_DEVICES=1 python examples/voxcpm2_usage_example.py
+    python examples/voxcpm2_usage_example.py
 """
 
 
@@ -83,7 +83,6 @@ def main():
         text=long_chinese.strip(),
         reference_wav="/home/andrewzhu/storage_1t_1/az_git_folder/az_samples/ai_models_eval/voice_models/qwen3-tts/role_voices/female_ch_1.wav",
         reference_text="今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。",
-        voice_anchor_strength=0.15,  # Stabilizes speaker identity across chunks
         output_wav_path="outputs/example_long_zh.wav",
     )
     print(f"Generated {len(wav) / sr:.1f}s audio")

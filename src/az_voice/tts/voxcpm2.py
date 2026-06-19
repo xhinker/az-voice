@@ -55,7 +55,7 @@ class VoxCPM2Engine:
 
         # Setup cache directory
         if cache_dir is None:
-            script_dir = Path(__file__).resolve().parent.parent.parent
+            script_dir = Path(__file__).resolve().parent.parent.parent.parent
             cache_dir = str(script_dir / "models")
         self.cache_dir = cache_dir
         os.environ["HF_HOME"] = cache_dir
@@ -97,7 +97,6 @@ class VoxCPM2Engine:
         inference_timesteps: int = 10,
         target_seconds: float = 15.0,
         max_words: int = 28,
-        voice_anchor_strength: Optional[float] = None,
     ) -> Tuple[np.ndarray, int]:
         """Generate audio from text.
 
@@ -112,7 +111,6 @@ class VoxCPM2Engine:
             inference_timesteps: Diffusion steps (fewer = faster, 7-15 recommended).
             target_seconds: Target duration per chunk.
             max_words: Hard cap on words per segment.
-            voice_anchor_strength: Voice anchor strength for long-form stability (0.0-1.0).
 
         Returns:
             (wav_array, sample_rate) tuple.
@@ -150,11 +148,7 @@ class VoxCPM2Engine:
                 "inference_timesteps": inference_timesteps,
             }
 
-            # Apply voice anchor strength for long-form stability
-            if voice_anchor_strength is not None:
-                kwargs["voice_anchor_strength"] = voice_anchor_strength
-
-            # Handle reference audio and fixed-seed continuation
+            # VoxCPM requires prompt_wav_path and prompt_text together (or neither)
             if reference_wav is not None and reference_text is not None:
                 # Hi-Fi cloning with transcript
                 kwargs["prompt_wav_path"] = reference_wav
