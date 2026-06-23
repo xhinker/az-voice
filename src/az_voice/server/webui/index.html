@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>az-voice TTS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>az-voice <span class="badge">TTS</span></h1>
+      <p class="subtitle">Text-to-speech powered by VoxCPM2</p>
+    </header>
+
+    <div class="status-bar" id="statusBar">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking server...</span>
+    </div>
+
+    <main>
+      <div class="input-section">
+        <label for="textInput">Text</label>
+        <textarea id="textInput" placeholder="Enter text to synthesize...&#10;&#10;Supports English and Chinese." rows="6">Hello! This is a test of az-voice text-to-speech.</textarea>
+      </div>
+
+      <div class="controls">
+        <div class="control-group">
+          <label for="formatSelect">Format</label>
+          <select id="formatSelect">
+            <option value="mp3" selected>MP3</option>
+            <option value="wav">WAV</option>
+            <option value="flac">FLAC</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="speedRange">Speed: <span id="speedValue">1.0</span>x</label>
+          <input type="range" id="speedRange" min="0.25" max="2.0" step="0.25" value="1.0">
+        </div>
+
+        <div class="control-group wide">
+          <label for="styleInput">Style (optional)</label>
+          <input type="text" id="styleInput" placeholder='e.g. "speaking slowly, happy tone"'>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="generateBtn" class="btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Generate
+        </button>
+        <button id="clearBtn" class="btn-secondary">Clear</button>
+      </div>
+
+      <div class="output-section" id="outputSection" hidden>
+        <div class="output-header">
+          <h3>Generated Audio</h3>
+          <span id="outputInfo"></span>
+        </div>
+        <audio id="audioPlayer" controls></audio>
+        <div class="output-actions">
+          <button id="downloadBtn" class="btn-secondary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download
+          </button>
+        </div>
+      </div>
+
+      <div class="error-section" id="errorSection" hidden>
+        <div class="error-content">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          <span id="errorText"></span>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <a href="/v1/models" target="_blank">Models</a> &middot;
+      <a href="/health" target="_blank">Health</a> &middot;
+      OpenAI-compatible API on <code>/v1/audio/speech</code>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

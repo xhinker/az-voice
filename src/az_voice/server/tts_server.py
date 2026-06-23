@@ -90,6 +90,9 @@ class _EngineManager:
         logger.info("VoxCPM2 engine loaded on %s", self.device)
 
 
+# WebUI static files path
+_WEBUI_DIR = Path(__file__).parent / 'webui'
+
 engine_manager: Optional[_EngineManager] = None
 
 
@@ -281,7 +284,7 @@ def _encode_audio(
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def create_app(device: str = "cuda:0", cache_dir: Optional[str] = None) -> web.Application:
-    """Create the aiohttp web application."""
+    """Create the aiohttp web application with WebUI and API endpoints."""
     global engine_manager
     engine_manager = _EngineManager(device=device, cache_dir=cache_dir)
 
@@ -290,6 +293,18 @@ def create_app(device: str = "cuda:0", cache_dir: Optional[str] = None) -> web.A
     app.router.add_get("/v1/models", handle_models)
     app.router.add_post("/v1/audio/speech", handle_speech)
     app.router.add_post("/audio/speech", handle_speech)
+
+    # Serve WebUI static files
+    if _WEBUI_DIR.exists():
+        async def _serve_index(request):
+            idx = _WEBUI_DIR / "index.html"
+            if idx.exists():
+                return web.FileResponse(idx)
+            return web.Response(status=404)
+        # Root handler MUST be added before static route (aiohttp matches first)
+        app.router.add_get("/", _serve_index)
+        app.router.add_static("/", str(_WEBUI_DIR), name="webui")
+        logger.info("WebUI served at root path /")
 
     return app
 
