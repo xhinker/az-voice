@@ -123,12 +123,12 @@ class VoxCPM2Engine:
         )
 
     def _cache_key(self, reference_wav, reference_text):
-        """Build a cache key from reference audio CONTENT and text (not path)."""
+        """Build a cache key from reference audio CONTENT and text (not path).
+        Uses SHA-256 first 12 hex chars to match client-side hashing."""
         import hashlib
-        # Hash file content, not path — temp files have random names
         with open(reference_wav, "rb") as f:
-            wav_key = hashlib.md5(f.read()).hexdigest()[:12]
-        text_key = hashlib.md5(str(reference_text).encode()).hexdigest()[:12]
+            wav_key = hashlib.sha256(f.read()).hexdigest()[:12]
+        text_key = hashlib.sha256(str(reference_text).encode()).hexdigest()[:12]
         return f"{wav_key}:{text_key}"
 
     def _get_prompt_cache(self, reference_wav, reference_text):
@@ -159,6 +159,7 @@ class VoxCPM2Engine:
         control_instruction: Optional[str] = None,
         cfg_value: float = 2.0,
         inference_timesteps: int = 10,
+        cached_prompt_cache: Optional[dict] = None,
     ):
         """Generate audio from text, yielding chunks as they become available.
 
@@ -186,8 +187,11 @@ class VoxCPM2Engine:
 
         segments = split_text_for_tts(text, max_words=28, target_seconds=15.0)
 
-        # Get or build prompt cache (skips VAE encoding on cache hit)
-        prompt_cache = self._get_prompt_cache(reference_wav, reference_text)
+        # Get prompt cache: use pre-built if provided, else lookup/build
+        if cached_prompt_cache is not None:
+            prompt_cache = cached_prompt_cache
+        else:
+            prompt_cache = self._get_prompt_cache(reference_wav, reference_text)
 
         for seg_idx, seg_text in enumerate(segments):
             print(f"Streaming segment {seg_idx + 1}/{len(segments)}: {seg_text}")

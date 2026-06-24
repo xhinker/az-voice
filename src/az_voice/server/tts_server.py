@@ -190,8 +190,6 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
 
     model = body.get("model", DEFAULT_MODEL)
     speed = float(body.get("speed", 1.0))
-    reference_wav = _decode_reference_wav(body.get("reference_wav"))
-    reference_text = body.get("reference_text")
     control_instruction = body.get("control_instruction")
     cfg_value = float(body.get("cfg_value", 2.0))
     inference_timesteps = int(body.get("inference_timesteps", 10))
@@ -212,6 +210,9 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
             {"error": {"message": "Model load failed: {}".format(exc), "type": "server_error"}},
             status=503,
         )
+
+    reference_wav = _decode_reference_wav(body.get("reference_wav"))
+    reference_text = body.get("reference_text")
 
     # Use SSE to stream audio chunks
     response = web.StreamResponse(
@@ -346,9 +347,6 @@ async def handle_speech(request: web.Request) -> web.Response:
     model = body.get("model", DEFAULT_MODEL)
     response_format = body.get("response_format", "mp3")
     speed = float(body.get("speed", 1.0))
-
-    reference_wav = _decode_reference_wav(body.get("reference_wav"))
-    reference_text = body.get("reference_text")
     control_instruction = body.get("control_instruction")
     cfg_value = float(body.get("cfg_value", 2.0))
     inference_timesteps = int(body.get("inference_timesteps", 10))
@@ -383,6 +381,9 @@ async def handle_speech(request: web.Request) -> web.Response:
             {"error": {"message": f"Model load failed: {exc}", "type": "server_error"}},
             status=503,
         )
+
+    reference_wav = _decode_reference_wav(body.get("reference_wav"))
+    reference_text = body.get("reference_text")
 
     try:
         wav, sample_rate = await asyncio.get_running_loop().run_in_executor(
