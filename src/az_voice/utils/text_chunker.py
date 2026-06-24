@@ -78,9 +78,10 @@ def _estimate_seconds(piece: str) -> float:
 def _clean_segment(text: str) -> str:
     """Clean up spaces in text segments.
 
-    1. Remove spaces between CJK characters (e.g., "阿凯笛亚 庄园" -> "阿凯笛亚庄园")
-    2. Remove spaces within URL/noise fragments embedded in CJK text
-       (e.g., "ww w . xiaoshuotxt.co m" -> "www.xiaoshuotxt.com")
+    1. Remove HTML entities
+    2. Normalize fullwidth chars to ASCII
+    3. Remove spaces between CJK characters
+    4. Remove URL patterns (handles spaces within URLs via flexible regex)
     """
     import re
 
@@ -89,20 +90,28 @@ def _clean_segment(text: str) -> str:
     text = re.sub(r"&#\d+;", "", text)
     text = re.sub(r"&#x[0-9a-fA-F]+;", "", text)
 
+    # Rule 0b: normalize fullwidth chars to ASCII
+    text = text.translate({
+        ord('\uFF0E'): '.', ord('\uFF1A'): ':', ord('\uFF1F'): '/',
+    })  # fullwidth dot, colon, slash
+    text = re.sub(r"[\uFF21-\uFF3A]", lambda m: chr(ord(m.group()) - 0xFF21 + ord('A')), text)
+    text = re.sub(r"[\uFF41-\uFF5A]", lambda m: chr(ord(m.group()) - 0xFF41 + ord('a')), text)
+    text = re.sub(r"[\uFF10-\uFF19]", lambda m: chr(ord(m.group()) - 0xFF10 + ord('0')), text)
+
     # Rule 1: remove spaces between CJK characters
     text = re.sub(r"([㐀-䶿一-鿿豈-﫿])\s+([㐀-䶿一-鿿豈-﫿])", r"\1\2", text)
 
-    # Rule 2: remove spaces within Latin fragments containing URL-like chars
-    # Match a run of Latin letters/digits separated by spaces/dots, bounded by non-Latin
-    def _clean_fragment(m):
-        fragment = m.group(0)
-        no_space = re.sub(r"[\s\u3000]+", "", fragment)
-        # Only remove spaces if fragment contains URL-like chars
-        if any(c in no_space for c in "./-_"):
-            return no_space
-        return fragment
-
-    text = re.sub(r"(?<![a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9.\s\u3000-]*[a-zA-Z0-9](?![a-zA-Z])", _clean_fragment, text)
+    # Rule 2: remove URL patterns
+    _tlds = r"(?:com|net|org|cn|edu|gov|io|biz|info|xyz|site|top|cc|tv|me)"
+    # URLs with TLD: e.g., "site.com", "ww w . site . com"
+    text = re.sub(r"(?i)[a-zA-Z0-9][a-zA-Z0-9\s.:/-]{2,}" + _tlds + r"\s*", "", text)
+    # www. prefixed: e.g., "www.xiaoshuotxt", "ww w . xiaoshuotxt"
+    text = re.sub(r"(?i)w[\s\u3000]*w[\s\u3000]*w[\s\u3000]*[.\s\u3000]+[a-zA-Z0-9][a-zA-Z0-9\s.\-]*", "", text)
+    # Multi-dot domains: segments must end at non-alnum (not partial words)
+    # Also require NOT preceded/followed by space (adjacent to CJK or string boundary)
+    _seg = r"[a-zA-Z0-9]{1,15}(?![a-zA-Z0-9])"
+    _ds = r"[\s\u3000]*\.[\s\u3000]*"
+    text = re.sub(r"(?i)(?<!\s)(?<![a-zA-Z0-9])" + _seg + _ds + _seg + _ds + _seg + r"(?!\s)", "", text)
 
     return text
 
