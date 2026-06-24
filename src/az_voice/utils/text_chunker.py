@@ -150,7 +150,12 @@ def split_text_for_tts(
                             break
                 if cut == -1:
                     for idx in range(end, scan_start - 1, -1):
-                        if normalized[idx - 1] in "—-":
+                        ch = normalized[idx - 1]
+                        if ch == "—":
+                            cut = idx
+                            break
+                        # Only split on hyphen if NOT part of a number range (e.g., "3-4")
+                        if ch == "-" and not (idx >= 2 and normalized[idx - 2].isdigit() and normalized[idx].isdigit()):
                             cut = idx
                             break
                 if cut == -1:
@@ -177,12 +182,21 @@ def split_text_for_tts(
             words = len(piece.split())
             if words > max_words:
                 flush_current()
-                start = 0
+                # Split into max_words-sized chunks, but adjust boundaries to terminal punctuation
                 word_list = piece.split()
+                start = 0
                 while start < len(word_list):
-                    part_words = word_list[start : start + max_words]
-                    segments.append(" ".join(part_words))
-                    start += max_words
+                    end = min(start + max_words, len(word_list))
+                    # Look ahead for terminal punctuation to avoid mid-sentence cuts
+                    found_term = -1
+                    for check in range(end, min(end + max_words, len(word_list))):
+                        if any(c in _TERMINAL_PUNCT_CHARS for c in word_list[check]):
+                            found_term = check + 1
+                            break
+                    if found_term > end:
+                        end = found_term
+                    segments.append(" ".join(word_list[start:end]))
+                    start = end
                 continue
 
             candidate = piece if not current else f"{current} {piece}"

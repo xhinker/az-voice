@@ -125,7 +125,7 @@ class VoxCPM2Engine:
         from az_voice.utils.text_chunker import split_text_for_tts
 
         # Chunk long text to stay within model context window
-        segments = split_text_for_tts(text, max_words=28, target_seconds=12.0)
+        segments = split_text_for_tts(text, max_words=28, target_seconds=15.0)
 
         for seg_idx, seg_text in enumerate(segments):
             kwargs = {
