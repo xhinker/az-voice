@@ -123,9 +123,11 @@ class VoxCPM2Engine:
         )
 
     def _cache_key(self, reference_wav, reference_text):
-        """Build a cache key from reference audio path and text."""
+        """Build a cache key from reference audio CONTENT and text (not path)."""
         import hashlib
-        wav_key = hashlib.md5(str(reference_wav).encode()).hexdigest()[:12]
+        # Hash file content, not path — temp files have random names
+        with open(reference_wav, "rb") as f:
+            wav_key = hashlib.md5(f.read()).hexdigest()[:12]
         text_key = hashlib.md5(str(reference_text).encode()).hexdigest()[:12]
         return f"{wav_key}:{text_key}"
 
