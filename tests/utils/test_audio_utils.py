@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from az_voice.utils.audio_utils import concatenate_wavs, encode_pcm_s16le
+from az_voice.utils.audio_utils import StreamingAudioSmoother, concatenate_wavs, encode_pcm_s16le
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,43 @@ class TestEncodePcmS16le:
             32767,
             -32767,
         ]
+
+
+# ---------------------------------------------------------------------------
+# StreamingAudioSmoother — de-click chunk boundaries
+# ---------------------------------------------------------------------------
+
+class TestStreamingAudioSmoother:
+    def test_holds_tail_until_next_chunk(self):
+        smoother = StreamingAudioSmoother(crossfade_samples=2)
+
+        out = smoother.push(np.array([0.0, 0.1, 0.2, 0.3], dtype=np.float32))
+        tail = smoother.flush()
+
+        np.testing.assert_allclose(out, [0.0, 0.1])
+        np.testing.assert_allclose(tail, [0.2, 0.3])
+
+    def test_crossfades_tail_with_next_chunk(self):
+        smoother = StreamingAudioSmoother(crossfade_samples=2)
+
+        first = smoother.push(np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32))
+        second = smoother.push(np.array([-1.0, -1.0, 0.0, 0.0], dtype=np.float32))
+        tail = smoother.flush()
+
+        np.testing.assert_allclose(first, [0.0, 0.0])
+        np.testing.assert_allclose(second, [1.0, 0.0])
+        np.testing.assert_allclose(tail, [0.0, 0.0])
+
+    def test_keeps_continuous_boundaries_unchanged(self):
+        smoother = StreamingAudioSmoother(crossfade_samples=2)
+
+        first = smoother.push(np.array([0.0, 0.1, 0.2, 0.3], dtype=np.float32))
+        second = smoother.push(np.array([0.31, 0.4, 0.5, 0.6], dtype=np.float32))
+        tail = smoother.flush()
+
+        np.testing.assert_allclose(first, [0.0, 0.1])
+        np.testing.assert_allclose(second, [0.2, 0.3, 0.31, 0.4])
+        np.testing.assert_allclose(tail, [0.5, 0.6])
 
 
 # ---------------------------------------------------------------------------

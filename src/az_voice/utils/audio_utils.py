@@ -14,6 +14,59 @@ def encode_pcm_s16le(wav: "numpy.ndarray") -> bytes:
     return (pcm * 32767.0).astype("<i2", copy=False).tobytes()
 
 
+class StreamingAudioSmoother:
+    """Crossfade streaming chunks before they are encoded for playback."""
+
+    def __init__(self, crossfade_samples: int = 256, discontinuity_threshold: float = 0.04):
+        self.crossfade_samples = crossfade_samples
+        self.discontinuity_threshold = discontinuity_threshold
+        self._tail = None
+
+    def push(self, wav: "numpy.ndarray") -> "numpy.ndarray | None":
+        """Return audio that is safe to stream now, holding a short tail."""
+        import numpy as np
+
+        chunk = np.asarray(wav, dtype=np.float32).reshape(-1)
+        chunk = np.nan_to_num(chunk, nan=0.0, posinf=1.0, neginf=-1.0)
+        chunk = np.clip(chunk, -1.0, 1.0)
+        if chunk.size == 0:
+            return None
+
+        keep = min(self.crossfade_samples, chunk.size)
+
+        if self._tail is None:
+            self._tail = chunk[-keep:].copy()
+            if chunk.size == keep:
+                return None
+            return chunk[:-keep]
+
+        fade = min(self.crossfade_samples, self._tail.size, chunk.size)
+        discontinuity = abs(float(self._tail[-1]) - float(chunk[0]))
+
+        if discontinuity >= self.discontinuity_threshold:
+            ramp = np.linspace(0.0, 1.0, fade, endpoint=False, dtype=np.float32)
+            joined = self._tail[-fade:] * (1.0 - ramp) + chunk[:fade] * ramp
+        else:
+            joined = np.concatenate([self._tail[-fade:], chunk[:fade]])
+
+        if discontinuity >= self.discontinuity_threshold:
+            if self._tail.size > fade:
+                output = np.concatenate([self._tail[:-fade], joined, chunk[fade:-keep]])
+            else:
+                output = np.concatenate([joined, chunk[fade:-keep]])
+        else:
+            output = np.concatenate([self._tail[:-fade], joined, chunk[fade:-keep]])
+
+        self._tail = chunk[-keep:].copy()
+        return output if output.size else None
+
+    def flush(self) -> "numpy.ndarray | None":
+        """Return the final held tail."""
+        tail = self._tail
+        self._tail = None
+        return tail
+
+
 def concatenate_wavs(
     wav_paths: list[str | Path],
     output_path: str | Path,
@@ -69,4 +122,4 @@ def concatenate_wavs(
     return out
 
 
-__all__ = ["concatenate_wavs", "encode_pcm_s16le"]
+__all__ = ["concatenate_wavs", "encode_pcm_s16le", "StreamingAudioSmoother"]

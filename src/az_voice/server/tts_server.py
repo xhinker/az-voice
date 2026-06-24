@@ -226,7 +226,7 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
 
     try:
         import base64
-        from az_voice.utils.audio_utils import encode_pcm_s16le
+        from az_voice.utils.audio_utils import StreamingAudioSmoother, encode_pcm_s16le
 
         # Send metadata first
         meta = json.dumps({
@@ -238,6 +238,10 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
         await response.write(("data: " + meta + "\n\n").encode())
 
         chunk_count = 0
+        smoother = None
+        if reference_wav is not None and reference_text is not None:
+            smoother = StreamingAudioSmoother(crossfade_samples=max(1, int(engine.sample_rate * 0.005)))
+
         for chunk in engine.generate_streaming(
             text=text,
             reference_wav=reference_wav,
@@ -248,7 +252,18 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
         ):
             # Encode raw PCM. Wrapping every chunk in WAV adds a RIFF header that
             # the browser streaming path would otherwise play as a click.
-            encoded = base64.b64encode(encode_pcm_s16le(chunk)).decode('ascii')
+            smoothed_chunk = smoother.push(chunk) if smoother is not None else chunk
+            if smoothed_chunk is None:
+                continue
+
+            encoded = base64.b64encode(encode_pcm_s16le(smoothed_chunk)).decode('ascii')
+            event = json.dumps({"type": "audio", "chunk": chunk_count, "data": encoded})
+            await response.write(("data: " + event + "\n\n").encode())
+            chunk_count += 1
+
+        final_chunk = smoother.flush() if smoother is not None else None
+        if final_chunk is not None:
+            encoded = base64.b64encode(encode_pcm_s16le(final_chunk)).decode('ascii')
             event = json.dumps({"type": "audio", "chunk": chunk_count, "data": encoded})
             await response.write(("data: " + event + "\n\n").encode())
             chunk_count += 1

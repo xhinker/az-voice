@@ -239,7 +239,6 @@ let streamController = null;
 let streamSampleRate = 24000;
 let streamNextStartTime = 0;
 let streamSources = new Set();
-let streamLastSample = null;
 
 const STREAM_INITIAL_DELAY_SEC = 0.18;
 const STREAM_RECOVERY_DELAY_SEC = 0.02;
@@ -323,7 +322,7 @@ async function startStream() {
         if (data.type === 'metadata') {
           if (data.sample_rate) streamSampleRate = data.sample_rate;
         } else if (data.type === 'audio') {
-          const float32 = smoothChunkBoundary(decodePcm16(data.data));
+          const float32 = decodePcm16(data.data);
           queueStreamChunk(float32);
           chunkCount++;
           streamStatusText.textContent = 'Generating... (' + chunkCount + ' chunks)';
@@ -359,22 +358,6 @@ function decodePcm16(base64) {
     samples[i] = view.getInt16(i * 2, true) / 32768;
   }
 
-  return samples;
-}
-
-function smoothChunkBoundary(samples) {
-  if (!samples.length) return samples;
-
-  if (streamLastSample !== null) {
-    const fade = Math.min(STREAM_DECLICK_SAMPLES, samples.length);
-    const offset = streamLastSample - samples[0];
-    for (let i = 0; i < fade; i++) {
-      const t = i / fade;
-      samples[i] += offset * (1 - t);
-    }
-  }
-
-  streamLastSample = samples[samples.length - 1];
   return samples;
 }
 
@@ -419,7 +402,6 @@ function resetStreamPlayback() {
   }
   streamSources.clear();
   streamNextStartTime = 0;
-  streamLastSample = null;
 }
 
 function stopStream() {
