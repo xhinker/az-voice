@@ -19,6 +19,12 @@
     </div>
 
     <main>
+      <div class="tabs">
+        <button class="tab active" data-tab="generate">Generate</button>
+        <button class="tab" data-tab="stream">Stream</button>
+      </div>
+
+      <div class="tab-content active" id="tab-generate">
       <div class="input-section">
         <label for="textInput">Text</label>
         <textarea id="textInput" placeholder="Enter text to synthesize...&#10;&#10;Supports English and Chinese." rows="6">Hello! This is a test of az-voice text-to-speech.</textarea>
@@ -66,6 +72,47 @@
           </button>
         </div>
       </div>
+      </div> <!-- end tab-generate -->
+
+      <div class="tab-content" id="tab-stream">
+      <div class="input-section">
+        <label for="streamTextInput">Text to stream</label>
+        <textarea id="streamTextInput" placeholder="Enter text to stream...&#10;&#10;Audio will play in real-time as it generates." rows="4">Hello! This is a streaming demo of az-voice text-to-speech.</textarea>
+      </div>
+
+      <div class="controls">
+        <div class="control-group wide">
+          <label for="streamStyleInput">Style (optional)</label>
+          <input type="text" id="streamStyleInput" placeholder='e.g. "speaking slowly, happy tone"'>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="streamBtn" class="btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Stream
+        </button>
+        <button id="stopStreamBtn" class="btn-secondary" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12"/></svg>
+          Stop
+        </button>
+      </div>
+
+      <div class="stream-status" id="streamStatus" hidden>
+        <div class="stream-indicator">
+          <span class="pulse-dot"></span>
+          <span id="streamStatusText">Streaming...</span>
+        </div>
+        <div class="stream-wave" id="streamWave"></div>
+      </div>
+
+      <div class="error-section" id="streamErrorSection" hidden>
+        <div class="error-content">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          <span id="streamErrorText"></span>
+        </div>
+      </div>
+      </div> <!-- end tab-stream -->
 
       <div class="error-section" id="errorSection" hidden>
         <div class="error-content">
@@ -82,6 +129,6 @@
     </footer>
   </div>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

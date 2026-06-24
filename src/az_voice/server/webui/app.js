@@ -206,6 +206,172 @@ textInput.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Tab switching ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── True streaming with AudioWorklet ──────────────────────────────────────────
+let streamAudioCtx = null;
+let streamWorkletNode = null;
+let streamController = null;
+
+const streamBtn = document.getElementById('streamBtn');
+const stopStreamBtn = document.getElementById('stopStreamBtn');
+const streamStatus = document.getElementById('streamStatus');
+const streamStatusText = document.getElementById('streamStatusText');
+const streamWave = document.getElementById('streamWave');
+const streamErrorSection = document.getElementById('streamErrorSection');
+const streamErrorText = document.getElementById('streamErrorText');
+const streamTextInput = document.getElementById('streamTextInput');
+const streamStyleInput = document.getElementById('streamStyleInput');
+
+// Build wave animation bars
+for (let i = 0; i < 8; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  streamWave.appendChild(bar);
+}
+
+streamBtn.addEventListener('click', startStream);
+stopStreamBtn.addEventListener('click', stopStream);
+
+async function startStream() {
+  const text = streamTextInput.value.trim();
+  if (!text) return;
+
+  streamErrorSection.hidden = true;
+  streamStatus.hidden = false;
+  streamStatusText.textContent = 'Connecting...';
+  streamBtn.hidden = true;
+  stopStreamBtn.hidden = false;
+
+  // Initialize audio - try AudioWorklet first, fallback to ScriptProcessor
+  if (!streamAudioCtx) {
+    streamAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (streamAudioCtx.state === 'suspended') await streamAudioCtx.resume();
+
+  // Try AudioWorklet for gapless playback
+  let useWorklet = false;
+  if (!streamWorkletNode) {
+    try {
+      await streamAudioCtx.audioWorklet.addModule('stream-processor.js');
+      streamWorkletNode = new AudioWorkletNode(streamAudioCtx, 'streaming-audio-processor');
+      streamWorkletNode.connect(streamAudioCtx.destination);
+      useWorklet = true;
+      console.log('[stream] AudioWorklet initialized');
+    } catch(e) {
+      console.warn('[stream] AudioWorklet failed, using fallback:', e);
+      useWorklet = false;
+    }
+  }
+
+  if (useWorklet) {
+    if (useWorklet && streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
+  }
+
+  streamController = new AbortController();
+  const payload = { model: 'voxcpm2', input: text };
+  const style = streamStyleInput.value.trim();
+  if (style) payload.control_instruction = style;
+
+  try {
+    const resp = await fetch('/v1/audio/speech/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: streamController.signal,
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let chunkCount = 0;
+    streamStatusText.textContent = 'Streaming...';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+
+        if (data.type === 'audio') {
+          const pcmBytes = Uint8Array.from(atob(data.data), c => c.charCodeAt(0));
+          const samples = new Int16Array(pcmBytes.buffer);
+          if (useWorklet && streamWorkletNode) {
+            streamWorkletNode.port.postMessage({ type: 'pcm', samples: samples });
+          } else {
+            // Fallback: queue and play via ScriptProcessor
+            playPcmFallback(samples);
+          }
+          chunkCount++;
+          streamStatusText.textContent = 'Streaming... (' + chunkCount + ' chunks)';
+        } else if (data.type === 'done') {
+          streamStatusText.textContent = 'Complete! (' + chunkCount + ' chunks)';
+        } else if (data.type === 'error') {
+          throw new Error(data.message);
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      streamStatusText.textContent = 'Stopped';
+    } else {
+      streamErrorText.textContent = err.message;
+      streamErrorSection.hidden = false;
+    }
+  } finally {
+    if (useWorklet && streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
+    setTimeout(() => {
+      streamStatus.hidden = true;
+      streamBtn.hidden = false;
+      stopStreamBtn.hidden = true;
+    }, 2000);
+  }
+}
+
+// Fallback playback using ScriptProcessor (for browsers without AudioWorklet)
+let fallbackProcessor = null;
+let fallbackQueue = [];
+
+function playPcmFallback(samples) {
+  fallbackQueue.push(...samples);
+  
+  if (!fallbackProcessor) {
+    // Create ScriptProcessor (deprecated but widely supported)
+    fallbackProcessor = streamAudioCtx.createScriptProcessor(4096, 0, 1);
+    fallbackProcessor.onaudioprocess = (e) => {
+      const output = e.outputBuffer.getChannelData(0);
+      for (let i = 0; i < output.length; i++) {
+        output[i] = fallbackQueue.length > 0 ? fallbackQueue.shift() / 32768 : 0;
+      }
+    };
+    fallbackProcessor.connect(streamAudioCtx.destination);
+  }
+}
+
+function stopStream() {
+  if (streamController) { streamController.abort(); streamController = null; }
+  if (streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
+  if (fallbackProcessor) {
+    fallbackProcessor.disconnect();
+    fallbackProcessor = null;
+  }
+  fallbackQueue = [];
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   // Verify DOM elements exist

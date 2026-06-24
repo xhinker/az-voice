@@ -90,6 +90,59 @@ class VoxCPM2Engine:
             raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
         return self._sample_rate
 
+    def generate_streaming(
+        self,
+        text: str,
+        reference_wav: Optional[str] = None,
+        reference_text: Optional[str] = None,
+        control_instruction: Optional[str] = None,
+        cfg_value: float = 2.0,
+        inference_timesteps: int = 10,
+    ):
+        """Generate audio from text, yielding chunks as they become available.
+
+        Uses VoxCPM2's native generate_streaming() for real-time audio output.
+        Each yielded chunk is a numpy array of audio samples.
+
+        Args:
+            text: Text to synthesize.
+            reference_wav: Path to reference audio for cloning.
+            reference_text: Transcript of reference audio.
+            control_instruction: Style control instruction.
+            cfg_value: Classifier-free guidance scale.
+            inference_timesteps: Diffusion steps.
+
+        Yields:
+            numpy.ndarray: Audio chunks (1D float32 arrays).
+
+        Raises:
+            RuntimeError: If model not loaded.
+        """
+        if not self.is_loaded:
+            raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
+
+        kwargs = {
+            "text": text,
+            "cfg_value": cfg_value,
+            "inference_timesteps": inference_timesteps,
+        }
+
+        if reference_wav is not None and reference_text is not None:
+            kwargs["prompt_wav_path"] = reference_wav
+            kwargs["prompt_text"] = reference_text
+        elif reference_wav is not None:
+            if control_instruction is not None:
+                kwargs["text"] = f"({control_instruction}){text}"
+            kwargs["reference_wav_path"] = reference_wav
+
+        print(f"Streaming: {text[:80]}...")
+
+        with torch.inference_mode():
+            for chunk in self._model.generate_streaming(**kwargs):
+                yield chunk
+
+        clear_vram()
+
     def generate(
         self,
         text: str,

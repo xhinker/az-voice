@@ -133,6 +133,104 @@ engine_manager: Optional[_EngineManager] = None
 
 # ── API handlers ──────────────────────────────────────────────────────────────
 
+async def handle_speech_stream(request: web.Request) -> web.Response:
+    """Stream speech from text using Server-Sent Events.
+    
+    Returns audio chunks as WAV-encoded SSE events for real-time playback.
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": {"message": "Invalid JSON", "type": "invalid_request_error"}},
+            status=400,
+        )
+
+    text = body.get("input")
+    if not text or not isinstance(text, str):
+        return web.json_response(
+            {"error": {"message": "'input' is required and must be a non-empty string",
+                        "type": "invalid_request_error"}},
+            status=400,
+        )
+
+    model = body.get("model", DEFAULT_MODEL)
+    speed = float(body.get("speed", 1.0))
+    reference_wav = body.get("reference_wav")
+    reference_text = body.get("reference_text")
+    control_instruction = body.get("control_instruction")
+    cfg_value = float(body.get("cfg_value", 2.0))
+    inference_timesteps = int(body.get("inference_timesteps", 10))
+
+    model_ids = {m["id"] for m in MODELS}
+    if model not in model_ids:
+        return web.json_response(
+            {"error": {"message": "Model '{}' not found. Available: {}".format(model, list(model_ids)),
+                        "type": "invalid_request_error"}},
+            status=400,
+        )
+
+    try:
+        engine = await engine_manager.get_engine()
+    except Exception as exc:
+        logger.error("Failed to load engine: %s", exc)
+        return web.json_response(
+            {"error": {"message": "Model load failed: {}".format(exc), "type": "server_error"}},
+            status=503,
+        )
+
+    # Use SSE to stream audio chunks
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+
+    try:
+        import base64
+        import io
+        import soundfile as sf
+
+        # Send metadata first
+        meta = json.dumps({"type": "metadata", "sample_rate": engine.sample_rate})
+        await response.write(("data: " + meta + "\n\n").encode())
+
+        chunk_count = 0
+        for chunk in engine.generate_streaming(
+            text=text,
+            reference_wav=reference_wav,
+            reference_text=reference_text,
+            control_instruction=control_instruction,
+            cfg_value=cfg_value,
+            inference_timesteps=inference_timesteps,
+        ):
+            # Encode chunk as WAV
+            buf = io.BytesIO()
+            sf.write(buf, chunk, engine.sample_rate, format="WAV")
+            wav_bytes = buf.getvalue()
+
+            # Base64 encode for SSE transport
+            encoded = base64.b64encode(wav_bytes).decode('ascii')
+            event = json.dumps({"type": "audio", "chunk": chunk_count, "data": encoded})
+            await response.write(("data: " + event + "\n\n").encode())
+            chunk_count += 1
+
+        # Send done signal
+        done = json.dumps({"type": "done", "total_chunks": chunk_count})
+        await response.write(("data: " + done + "\n\n").encode())
+
+    except Exception as exc:
+        logger.error("Streaming failed: %s", exc, exc_info=True)
+        err = json.dumps({"type": "error", "message": str(exc)})
+        await response.write(("data: " + err + "\n\n").encode())
+
+    return response
+
+
 async def handle_health(request: web.Request) -> web.Response:
     """Health check endpoint with model download progress."""
     if not engine_manager:
@@ -338,6 +436,8 @@ def create_app(device: str = "cuda:0", cache_dir: Optional[str] = None) -> web.A
     app.router.add_get("/v1/models", handle_models)
     app.router.add_post("/v1/audio/speech", handle_speech)
     app.router.add_post("/audio/speech", handle_speech)
+    app.router.add_post("/v1/audio/speech/stream", handle_speech_stream)
+    app.router.add_post("/audio/speech/stream", handle_speech_stream)
 
     # Serve WebUI static files
     if _WEBUI_DIR.exists():
