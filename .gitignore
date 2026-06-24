@@ -219,3 +219,4 @@ __marimo__/
 models/*
 !models/README.md
 outputs/
+*_bkup/

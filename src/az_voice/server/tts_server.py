@@ -38,11 +38,19 @@ DEFAULT_MODEL = "voxcpm2"
 DEFAULT_DEVICE = "cuda:0"
 DEFAULT_PORT = 8766
 
+# Default model cache directory
+_DEFAULT_CACHE_DIR = str(Path.home() / ".az-voice" / "models")
+
 
 # ── Engine manager (lazy-load, singleton) ─────────────────────────────────────
 
 class _EngineManager:
-    """Lazy-loads VoxCPM2Engine on first request, reuses across calls."""
+    """Lazy-loads VoxCPM2Engine on first request, reuses across calls.
+    
+    Tracks model download progress for WebUI status display.
+    """
+
+    MODEL_NAME = "openbmb/VoxCPM2"
 
     def __init__(self, device: str = "cuda:0", cache_dir: Optional[str] = None):
         self.device = device
@@ -50,6 +58,26 @@ class _EngineManager:
         self._engine = None
         self._loading = False
         self._lock = asyncio.Lock()
+        # Download progress tracking
+        self._download_progress = None  # dict with status, message, percent
+        self._check_model_cached()
+
+    def _check_model_cached(self):
+        """Check if model is already cached locally."""
+        import os
+        base = self.cache_dir or _DEFAULT_CACHE_DIR
+        
+        # Check for HuggingFace cache
+        model_dir = os.path.join(base, "models--openbmb--VoxCPM2")
+        if os.path.isdir(model_dir):
+            self._download_progress = {"status": "cached", "message": "Model files cached · Will load on first request", "percent": 90}
+        else:
+            self._download_progress = {"status": "pending", "message": "Model not cached - will download on first request", "percent": 0}
+
+    @property
+    def download_progress(self):
+        """Get current download progress for WebUI status."""
+        return self._download_progress or {"status": "unknown", "message": "", "percent": 0}
 
     @property
     def engine(self):
@@ -78,16 +106,23 @@ class _EngineManager:
                 self._loading = False
 
     def _load_sync(self):
-        """Blocking model load (runs in executor)."""
+        """Blocking model load (runs in executor). Tracks download progress."""
         from az_voice.tts.voxcpm2 import VoxCPM2Engine
 
+        self._download_progress = {"status": "loading", "message": "Loading VoxCPM2 model...", "percent": 10}
+        logger.info("Loading VoxCPM2 model (first request, may download)...")
+
         self._engine = VoxCPM2Engine(
-            model_name="openbmb/VoxCPM2",
+            model_name=self.MODEL_NAME,
             device=self.device,
-            cache_dir=self.cache_dir,
+            cache_dir=self.cache_dir or _DEFAULT_CACHE_DIR,
         )
+
+        self._download_progress = {"status": "loading", "message": "Initializing model on %s..." % self.device, "percent": 50}
         self._engine.load_model()
         logger.info("VoxCPM2 engine loaded on %s", self.device)
+        # Mark ready AFTER engine is fully loaded
+        self._download_progress = {"status": "ready", "message": "Model ready on %s" % self.device, "percent": 100}
 
 
 # WebUI static files path
@@ -99,12 +134,22 @@ engine_manager: Optional[_EngineManager] = None
 # ── API handlers ──────────────────────────────────────────────────────────────
 
 async def handle_health(request: web.Request) -> web.Response:
-    """Health check endpoint."""
-    loaded = engine_manager.engine is not None if engine_manager else False
+    """Health check endpoint with model download progress."""
+    if not engine_manager:
+        return web.json_response({
+            "status": "ok",
+            "model_loaded": False,
+            "device": "not configured",
+            "model_progress": {"status": "unknown", "message": "", "percent": 0},
+        })
+    
+    loaded = engine_manager.engine is not None
+    progress = engine_manager.download_progress
     return web.json_response({
         "status": "ok",
         "model_loaded": loaded,
-        "device": engine_manager.device if engine_manager else "not configured",
+        "device": engine_manager.device,
+        "model_progress": progress,
     })
 
 
@@ -311,6 +356,55 @@ def create_app(device: str = "cuda:0", cache_dir: Optional[str] = None) -> web.A
 
 # ── CLI entry point with subcommand support ───────────────────────────────────
 
+def _start_background_download(engine_mgr):
+    """Start model download in background if not cached."""
+    import os
+    
+    base = engine_mgr.cache_dir or _DEFAULT_CACHE_DIR
+    
+    model_dir = os.path.join(base, "models--openbmb--VoxCPM2")
+    
+    if os.path.isdir(model_dir):
+        logger.info("Model already cached: %s", model_dir)
+        engine_mgr._download_progress = {"status": "cached", "message": "Model files cached · Will load on first request", "percent": 90}
+        return
+    
+    async def _download_task():
+        engine_mgr._download_progress = {"status": "downloading", "message": "Downloading VoxCPM2 model...", "percent": 0}
+        logger.info("=" * 60)
+        logger.info("Downloading VoxCPM2 model...")
+        logger.info("Cache directory: %s", base)
+        logger.info("=" * 60)
+        
+        try:
+            from huggingface_hub import snapshot_download
+            
+            # Run blocking download in thread executor so event loop stays responsive
+            def _do_download():
+                engine_mgr._download_progress = {"status": "downloading", "message": "Downloading model files...", "percent": 30}
+                snapshot_download(
+                    repo_id="openbmb/VoxCPM2",
+                    cache_dir=base,
+                )
+                engine_mgr._download_progress = {"status": "downloading", "message": "Finalizing download...", "percent": 80}
+            
+            await asyncio.get_event_loop().run_in_executor(None, _do_download)
+            
+            engine_mgr._download_progress = {"status": "cached", "message": "Download complete · Will load on first request", "percent": 90}
+            logger.info("Model download complete!")
+            
+        except ImportError:
+            engine_mgr._download_progress = {"status": "pending", "message": "huggingface_hub not installed. Model will download on first request.", "percent": 0}
+            logger.warning("huggingface_hub not installed. Model will download on first request.")
+            logger.warning("Install with: pip install huggingface_hub")
+        except Exception as e:
+            engine_mgr._download_progress = {"status": "error", "message": f"Download failed: {e}", "percent": 0}
+            logger.error("Model download failed: %s", e)
+    
+    # Return the coroutine for the caller to schedule
+    return _download_task()
+
+
 def _serve_command(args):
     """Handle the 'serve' subcommand."""
     logging.basicConfig(
@@ -319,6 +413,17 @@ def _serve_command(args):
     )
 
     app = create_app(device=args.device, cache_dir=args.cache_dir)
+    
+    # Schedule background download via aiohttp on_startup (event loop is running)
+    async def _on_startup(app):
+        try:
+            task = _start_background_download(engine_manager)
+            if task:
+                asyncio.get_event_loop().create_task(task)
+        except Exception as e:
+            logger.error("Failed to start background download: %s", e)
+
+    app.on_startup.append(_on_startup)
 
     logger.info("Starting az-voice TTS server on %s:%s", args.host, args.port)
     logger.info("Health check: http://%s:%s/health", args.host, args.port)
@@ -364,7 +469,7 @@ def main():
     serve_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     serve_parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Port (default: {DEFAULT_PORT})")
     serve_parser.add_argument("--device", default=DEFAULT_DEVICE, help=f"GPU device (default: {DEFAULT_DEVICE})")
-    serve_parser.add_argument("--cache-dir", default=None, help="Model cache directory")
+    serve_parser.add_argument("--cache-dir", default=None, help=f"Model cache directory (default: ~{_DEFAULT_CACHE_DIR})")
 
     args = parser.parse_args()
 
