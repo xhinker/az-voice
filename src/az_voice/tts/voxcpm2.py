@@ -57,9 +57,10 @@ class VoxCPM2Engine:
         self._model = None
         self._sample_rate = None
 
-        # Prompt cache: stores encoded reference audio to skip VAE encoding on reuse
-        self._fixed_prompt_cache = None
-        self._fixed_prompt_cache_key = None  # (reference_wav, reference_text) hash
+        # Prompt cache: LRU dict mapping (wav_hash, text_hash) -> prompt_cache dict
+        # Stores encoded reference audio to skip VAE encoding on reuse.
+        self._prompt_cache = {}
+        self._prompt_cache_max = 8
 
         # Setup cache directory
         if cache_dir is None:
