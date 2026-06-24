@@ -127,43 +127,37 @@ class _EngineManager:
 
 # WebUI static files path
 def _decode_reference_wav(ref_wav):
-    """Decode reference_wav: if base64 data URI, save to temp WAV file; else return as-is."""
-    if ref_wav and ref_wav.startswith("data:audio"):
+    """Decode reference_wav: if base64 data URI, save to temp file; else return as-is."""
+    if not ref_wav or not ref_wav.startswith("data:audio"):
+        return ref_wav
+    try:
         import base64
         import tempfile
-        import wave
-        import numpy as np
-        import torchaudio
         
-        # Extract MIME type and base64 data
         header, data = ref_wav.split(",", 1)
-        mime = header.split(";")[0].split(":")[1]  # e.g. "audio/wav", "audio/mpeg"
+        mime = header.split(";")[0].split(":")[1]
         audio_bytes = base64.b64decode(data)
         
-        # Save raw bytes with correct extension for torchaudio to detect
+        # Map MIME type to file extension
         ext_map = {
             "audio/wav": ".wav",
+            "audio/x-wav": ".wav",
             "audio/mpeg": ".mp3",
             "audio/mp3": ".mp3",
             "audio/ogg": ".ogg",
             "audio/flac": ".flac",
-            "audio/x-wav": ".wav",
+            "audio/webm": ".webm",
         }
         ext = ext_map.get(mime, ".wav")
         
-        # Load with torchaudio (auto-detects format) and re-encode as WAV
-        waveform, sr = torchaudio.load(io.BytesIO(audio_bytes))
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        # Normalize to [-1, 1]
-        waveform = waveform.float()
-        
-        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        torchaudio.save(tmp.name, waveform, sr, format="wav")
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        tmp.write(audio_bytes)
         tmp.close()
+        logger.info("Reference audio saved: %d bytes as %s", len(audio_bytes), ext)
         return tmp.name
-    return ref_wav
+    except Exception as exc:
+        logger.error("Failed to decode reference audio: %s", exc, exc_info=True)
+        return None
 
 
 _WEBUI_DIR = Path(__file__).parent / 'webui'
