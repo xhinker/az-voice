@@ -216,10 +216,12 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// ── True streaming with AudioWorklet ──────────────────────────────────────────
+// ── Streaming: collect chunks, play via AudioBufferSourceNode ─────────────────
 let streamAudioCtx = null;
-let streamWorkletNode = null;
 let streamController = null;
+let streamBuffer = [];
+let streamPlaying = false;
+let streamSource = null;
 
 const streamBtn = document.getElementById('streamBtn');
 const stopStreamBtn = document.getElementById('stopStreamBtn');
@@ -231,7 +233,6 @@ const streamErrorText = document.getElementById('streamErrorText');
 const streamTextInput = document.getElementById('streamTextInput');
 const streamStyleInput = document.getElementById('streamStyleInput');
 
-// Build wave animation bars
 for (let i = 0; i < 8; i++) {
   const bar = document.createElement('div');
   bar.className = 'bar';
@@ -251,30 +252,14 @@ async function startStream() {
   streamBtn.hidden = true;
   stopStreamBtn.hidden = false;
 
-  // Initialize audio - try AudioWorklet first, fallback to ScriptProcessor
   if (!streamAudioCtx) {
     streamAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
   if (streamAudioCtx.state === 'suspended') await streamAudioCtx.resume();
 
-  // Try AudioWorklet for gapless playback
-  let useWorklet = false;
-  if (!streamWorkletNode) {
-    try {
-      await streamAudioCtx.audioWorklet.addModule('stream-processor.js');
-      streamWorkletNode = new AudioWorkletNode(streamAudioCtx, 'streaming-audio-processor');
-      streamWorkletNode.connect(streamAudioCtx.destination);
-      useWorklet = true;
-      console.log('[stream] AudioWorklet initialized');
-    } catch(e) {
-      console.warn('[stream] AudioWorklet failed, using fallback:', e);
-      useWorklet = false;
-    }
-  }
-
-  if (useWorklet) {
-    if (useWorklet && streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
-  }
+  if (streamSource) { try { streamSource.stop(); } catch(e) {} streamSource = null; }
+  streamBuffer = [];
+  streamPlaying = false;
 
   streamController = new AbortController();
   const payload = { model: 'voxcpm2', input: text };
@@ -293,7 +278,7 @@ async function startStream() {
     const decoder = new TextDecoder();
     let buf = '';
     let chunkCount = 0;
-    streamStatusText.textContent = 'Streaming...';
+    streamStatusText.textContent = 'Generating...';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -312,14 +297,12 @@ async function startStream() {
           const int16 = new Int16Array(pcmBytes.buffer);
           const float32 = new Float32Array(int16.length);
           for (let j = 0; j < int16.length; j++) float32[j] = int16[j] / 32768;
-          if (useWorklet && streamWorkletNode) {
-            streamWorkletNode.port.postMessage({ type: 'pcm', samples: float32 });
-          } else {
-            playPcmFallback(float32);
-          }
+          streamBuffer.push(float32);
           chunkCount++;
-          streamStatusText.textContent = 'Streaming... (' + chunkCount + ' chunks)';
+          streamStatusText.textContent = 'Generating... (' + chunkCount + ' chunks)';
+          schedulePlayback();
         } else if (data.type === 'done') {
+          schedulePlayback();
           streamStatusText.textContent = 'Complete! (' + chunkCount + ' chunks)';
         } else if (data.type === 'error') {
           throw new Error(data.message);
@@ -334,64 +317,45 @@ async function startStream() {
       streamErrorSection.hidden = false;
     }
   } finally {
-    if (useWorklet && streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
     setTimeout(() => {
       streamStatus.hidden = true;
       streamBtn.hidden = false;
       stopStreamBtn.hidden = true;
-    }, 2000);
+    }, 3000);
   }
 }
 
-// Fallback playback - ring buffer with proper tail tracking for crossfade
-let fallbackProcessor = null;
-let fallbackQueue = [];
-let fallbackReadPos = 0;
-let fallbackTail = [];  // Last 64 samples actually played (for crossfade)
-const CF = 64;  // crossfade length
+function schedulePlayback() {
+  if (streamPlaying || streamBuffer.length === 0) return;
 
-function playPcmFallback(samples) {
-  // Crossfade: blend first CF samples with tail of previously PLAYED audio
-  if (fallbackTail.length >= CF && samples.length > CF) {
-    for (let i = 0; i < CF; i++) {
-      const t = (i + 1) / (CF + 1);
-      samples[i] = fallbackTail[Math.max(0, fallbackTail.length - CF + i)] * (1 - t) + samples[i] * t;
-    }
+  const totalLen = streamBuffer.reduce((s, c) => s + c.length, 0);
+  const merged = new Float32Array(totalLen);
+  let offset = 0;
+  for (const chunk of streamBuffer) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
   }
-  // Update tail with new samples
-  fallbackTail = Array.from(samples);
-  Array.prototype.push.apply(fallbackQueue, samples);
-  
-  if (!fallbackProcessor) {
-    fallbackProcessor = streamAudioCtx.createScriptProcessor(2048, 0, 1);
-    fallbackProcessor.onaudioprocess = (e) => {
-      const out = e.outputBuffer.getChannelData(0);
-      const avail = fallbackQueue.length - fallbackReadPos;
-      const copy = Math.min(out.length, avail);
-      for (let i = 0; i < copy; i++) out[i] = fallbackQueue[fallbackReadPos + i];
-      // If queue runs dry, fade to silence smoothly
-      if (copy < out.length) {
-        const fadeLen = Math.min(64, out.length - copy);
-        for (let i = 0; i < fadeLen; i++) {
-          out[copy + i] = (copy > 0 ? out[copy - 1] : 0) * (1 - i / fadeLen);
-        }
-        out.fill(0, copy + fadeLen);
-      }
-      fallbackReadPos += copy;
-      if (fallbackReadPos > 65536) { fallbackQueue = fallbackQueue.slice(fallbackReadPos); fallbackReadPos = 0; }
-    };
-    fallbackProcessor.connect(streamAudioCtx.destination);
-  }
+  streamBuffer = [];
+
+  const audioBuf = streamAudioCtx.createBuffer(1, merged.length, streamAudioCtx.sampleRate);
+  audioBuf.getChannelData(0).set(merged);
+
+  streamPlaying = true;
+  streamSource = streamAudioCtx.createBufferSource();
+  streamSource.buffer = audioBuf;
+  streamSource.connect(streamAudioCtx.destination);
+  streamSource.onended = () => {
+    streamPlaying = false;
+    if (streamBuffer.length > 0) schedulePlayback();
+  };
+  streamSource.start();
 }
 
 function stopStream() {
   if (streamController) { streamController.abort(); streamController = null; }
-  if (streamWorkletNode) streamWorkletNode.port.postMessage({ type: 'stop' });
-  if (fallbackProcessor) {
-    fallbackProcessor.disconnect();
-    fallbackProcessor = null;
-  }
-  fallbackQueue = [];
+  if (streamSource) { try { streamSource.stop(); } catch(e) {} streamSource = null; }
+  streamBuffer = [];
+  streamPlaying = false;
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
