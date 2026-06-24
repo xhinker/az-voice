@@ -137,12 +137,18 @@ def split_text_for_tts(
     Returns:
         List of text segments, each suitable for a single TTS inference call.
     """
-    clean = " ".join(text.strip().split())
+    # Convert line breaks to sentence boundaries so TTS pauses at paragraph breaks
+    clean = text.replace("\r\n", "。").replace("\n", "。").replace("\r", "。")
+    clean = " ".join(clean.strip().split())
     if not clean:
         return []
 
     # Clean full text BEFORE sentence splitting (URLs get broken at dots otherwise)
     clean = _clean_segment(clean)
+
+    # Collapse consecutive terminal punctuation (after URL removal may create "。。")
+    import re as _re
+    clean = _re.sub(r"[。！？]{2,}", lambda m: m.group(0)[0], clean)
 
     sentence_pattern = rf"[^.!?。！？]+(?:[.!?。！？]+[{re.escape(_CLOSING_QUOTE_CHARS)}]*)?"
     sentences = [
