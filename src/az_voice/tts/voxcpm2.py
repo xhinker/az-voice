@@ -57,6 +57,10 @@ class VoxCPM2Engine:
         self._model = None
         self._sample_rate = None
 
+        # Prompt cache: stores encoded reference audio to skip VAE encoding on reuse
+        self._fixed_prompt_cache = None
+        self._fixed_prompt_cache_key = None  # (reference_wav, reference_text) hash
+
         # Setup cache directory
         if cache_dir is None:
             script_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -89,6 +93,33 @@ class VoxCPM2Engine:
         if self._sample_rate is None:
             raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
         return self._sample_rate
+
+    def build_prompt_cache(
+        self,
+        prompt_text: Optional[str] = None,
+        prompt_wav_path: Optional[str] = None,
+        reference_wav_path: Optional[str] = None,
+    ) -> dict:
+        """Build prompt cache by encoding reference/prompt audio through VAE.
+
+        The returned cache dict can be reused across multiple generation calls
+        to skip the expensive VAE encoding step. Mirrors VoxCPM core.py logic.
+
+        Args:
+            prompt_text: Transcript of prompt audio (for continuation mode).
+            prompt_wav_path: Path to prompt audio (for continuation mode).
+            reference_wav_path: Path to reference audio (for voice cloning).
+
+        Returns:
+            Prompt cache dict with mode, ref_audio_feat, audio_feat, prompt_text.
+        """
+        if not self.is_loaded:
+            raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
+        return self._model.tts_model.build_prompt_cache(
+            prompt_text=prompt_text,
+            prompt_wav_path=prompt_wav_path,
+            reference_wav_path=reference_wav_path,
+        )
 
     def generate_streaming(
         self,
