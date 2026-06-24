@@ -233,16 +233,22 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// ── Streaming: schedule PCM chunks on the Web Audio clock ─────────────────────
+// ── Streaming: feed PCM chunks into one persistent Web Audio worklet ──────────
 let streamAudioCtx = null;
+let streamPlayerNode = null;
+let streamPlayerReady = null;
+let streamUseWorklet = false;
 let streamController = null;
 let streamSampleRate = 24000;
-let streamNextStartTime = 0;
-let streamSources = new Set();
+let streamBufferedSamples = 0;
+let streamBufferWaiters = [];
+let streamFallbackNextStartTime = 0;
+let streamFallbackSources = new Set();
 
-const STREAM_INITIAL_DELAY_SEC = 0.18;
-const STREAM_RECOVERY_DELAY_SEC = 0.02;
-const STREAM_DECLICK_SAMPLES = 128;
+const STREAM_PREBUFFER_SEC = 0.22;
+const STREAM_FADE_SEC = 0.006;
+const STREAM_HIGH_BUFFER_SEC = 20;
+const STREAM_LOW_BUFFER_SEC = 10;
 
 const streamBtn = document.getElementById('streamBtn');
 const stopStreamBtn = document.getElementById('stopStreamBtn');
@@ -273,33 +279,37 @@ async function startStream() {
   streamBtn.hidden = true;
   stopStreamBtn.hidden = false;
 
-  if (!streamAudioCtx) {
-    streamAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (streamAudioCtx.state === 'suspended') await streamAudioCtx.resume();
-
-  resetStreamPlayback();
-
-  streamController = new AbortController();
-  const payload = { model: 'voxcpm2', input: text };
-  const style = streamStyleInput.value.trim();
-  if (style) payload.control_instruction = style;
-
-  // Reference audio
-  const streamRefAudioFile = streamRefAudioInput.files[0];
-  if (streamRefAudioFile) {
-    payload.reference_wav = await fileToDataUri(streamRefAudioFile);
-    const streamRefText = streamRefTextInput.value.trim();
-    if (streamRefText) payload.reference_text = streamRefText;
-  }
-
   try {
+    streamUseWorklet = await ensureStreamPlayer();
+    resetStreamPlayback();
+
+    streamController = new AbortController();
+    const payload = { model: 'voxcpm2', input: text };
+    const style = streamStyleInput.value.trim();
+    if (style) payload.control_instruction = style;
+
+    // Reference audio
+    const streamRefAudioFile = streamRefAudioInput.files[0];
+    if (streamRefAudioFile) {
+      payload.reference_wav = await fileToDataUri(streamRefAudioFile);
+      const streamRefText = streamRefTextInput.value.trim();
+      if (streamRefText) payload.reference_text = streamRefText;
+    }
+
     const resp = await fetch('/v1/audio/speech/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: streamController.signal,
     });
+    if (!resp.ok || !resp.body) {
+      let message = `Stream request failed (${resp.status})`;
+      try {
+        const errBody = await resp.json();
+        message = errBody.error?.message || message;
+      } catch (e) {}
+      throw new Error(message);
+    }
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -326,6 +336,9 @@ async function startStream() {
           queueStreamChunk(float32);
           chunkCount++;
           streamStatusText.textContent = 'Generating... (' + chunkCount + ' chunks)';
+          if (streamUseWorklet) {
+            await waitForStreamBufferBelow(STREAM_LOW_BUFFER_SEC);
+          }
         } else if (data.type === 'done') {
           streamStatusText.textContent = 'Complete! (' + chunkCount + ' chunks)';
         } else if (data.type === 'error') {
@@ -361,10 +374,104 @@ function decodePcm16(base64) {
   return samples;
 }
 
+async function ensureStreamPlayer() {
+  if (!streamAudioCtx) {
+    streamAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (streamAudioCtx.state === 'suspended') await streamAudioCtx.resume();
+
+  if (streamPlayerNode) return true;
+  if (!streamAudioCtx.audioWorklet) {
+    console.warn('[stream] AudioWorklet unavailable; using fallback scheduler.');
+    return false;
+  }
+
+  try {
+    if (!streamPlayerReady) {
+      streamPlayerReady = withTimeout(
+        streamAudioCtx.audioWorklet.addModule('/stream-processor.js?v=3'),
+        3000,
+        'AudioWorklet module load timed out',
+      );
+    }
+    await streamPlayerReady;
+
+    streamPlayerNode = new AudioWorkletNode(streamAudioCtx, 'streaming-audio-processor', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+    streamPlayerNode.port.onmessage = (event) => {
+      if (event.data && event.data.type === 'buffer') {
+        streamBufferedSamples = event.data.samples || 0;
+        notifyStreamBufferWaiters();
+      }
+    };
+    streamPlayerNode.connect(streamAudioCtx.destination);
+    configureStreamPlayer();
+    return true;
+  } catch (err) {
+    console.warn('[stream] AudioWorklet init failed; using fallback scheduler.', err);
+    streamPlayerReady = null;
+    streamPlayerNode = null;
+    return false;
+  }
+}
+
+function withTimeout(promise, ms, message) {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function configureStreamPlayer() {
+  if (!streamPlayerNode || !streamAudioCtx) return;
+  streamPlayerNode.port.postMessage({
+    type: 'config',
+    prebufferSamples: Math.floor(streamAudioCtx.sampleRate * STREAM_PREBUFFER_SEC),
+    fadeSamples: Math.floor(streamAudioCtx.sampleRate * STREAM_FADE_SEC),
+  });
+}
+
 function queueStreamChunk(samples) {
   if (!samples.length) return;
 
-  const audioBuf = streamAudioCtx.createBuffer(1, samples.length, streamSampleRate);
+  const outputSamples = resampleIfNeeded(samples, streamSampleRate, streamAudioCtx.sampleRate);
+  if (!streamUseWorklet || !streamPlayerNode) {
+    queueFallbackStreamChunk(outputSamples);
+    return;
+  }
+
+  streamBufferedSamples += outputSamples.length;
+  streamPlayerNode.port.postMessage(
+    { type: 'pcm', samples: outputSamples.buffer },
+    [outputSamples.buffer],
+  );
+  notifyStreamBufferWaiters();
+}
+
+function resampleIfNeeded(samples, fromRate, toRate) {
+  if (!fromRate || !toRate || fromRate === toRate || samples.length < 2) {
+    return samples;
+  }
+
+  const ratio = toRate / fromRate;
+  const outputLength = Math.max(1, Math.round(samples.length * ratio));
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i++) {
+    const srcPos = i / ratio;
+    const left = Math.floor(srcPos);
+    const right = Math.min(samples.length - 1, left + 1);
+    const frac = srcPos - left;
+    output[i] = samples[left] * (1 - frac) + samples[right] * frac;
+  }
+  return output;
+}
+
+function queueFallbackStreamChunk(samples) {
+  const audioBuf = streamAudioCtx.createBuffer(1, samples.length, streamAudioCtx.sampleRate);
   audioBuf.getChannelData(0).set(samples);
 
   const source = streamAudioCtx.createBufferSource();
@@ -372,36 +479,71 @@ function queueStreamChunk(samples) {
   source.buffer = audioBuf;
   source.connect(gain);
   gain.connect(streamAudioCtx.destination);
-  source.onended = () => streamSources.delete(source);
+  source.onended = () => streamFallbackSources.delete(source);
 
   const now = streamAudioCtx.currentTime;
-  const isFirstChunk = streamNextStartTime === 0;
-  const underrun = !isFirstChunk && streamNextStartTime <= now;
+  const isFirstChunk = streamFallbackNextStartTime === 0;
+  const underrun = !isFirstChunk && streamFallbackNextStartTime <= now;
   const startAt = isFirstChunk
-    ? now + STREAM_INITIAL_DELAY_SEC
+    ? now + STREAM_PREBUFFER_SEC
     : underrun
-      ? now + STREAM_RECOVERY_DELAY_SEC
-      : streamNextStartTime;
+      ? now + 0.02
+      : streamFallbackNextStartTime;
 
   if (isFirstChunk || underrun) {
-    const fadeSec = STREAM_DECLICK_SAMPLES / streamSampleRate;
+    const fadeSec = STREAM_FADE_SEC;
     gain.gain.setValueAtTime(0, startAt);
     gain.gain.linearRampToValueAtTime(1, startAt + fadeSec);
   } else {
     gain.gain.setValueAtTime(1, startAt);
   }
 
-  streamSources.add(source);
+  streamFallbackSources.add(source);
   source.start(startAt);
-  streamNextStartTime = startAt + audioBuf.duration;
+  streamFallbackNextStartTime = startAt + audioBuf.duration;
+}
+
+function streamBufferedSeconds() {
+  if (!streamAudioCtx || streamAudioCtx.sampleRate <= 0) return 0;
+  return streamBufferedSamples / streamAudioCtx.sampleRate;
+}
+
+async function waitForStreamBufferBelow(seconds) {
+  while (streamController && streamBufferedSeconds() > STREAM_HIGH_BUFFER_SEC) {
+    await new Promise((resolve) => {
+      let waiter = null;
+      const timeout = setTimeout(() => {
+        streamBufferWaiters = streamBufferWaiters.filter((item) => item !== waiter);
+        resolve();
+      }, 100);
+      waiter = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      streamBufferWaiters.push(waiter);
+    });
+    if (streamBufferedSeconds() <= seconds) break;
+  }
+}
+
+function notifyStreamBufferWaiters() {
+  if (streamBufferedSeconds() > STREAM_LOW_BUFFER_SEC || streamBufferWaiters.length === 0) return;
+  const waiters = streamBufferWaiters;
+  streamBufferWaiters = [];
+  for (const resolve of waiters) resolve();
 }
 
 function resetStreamPlayback() {
-  for (const source of streamSources) {
-    try { source.stop(); } catch(e) {}
+  streamBufferedSamples = 0;
+  notifyStreamBufferWaiters();
+  if (streamPlayerNode) {
+    streamPlayerNode.port.postMessage({ type: 'reset' });
   }
-  streamSources.clear();
-  streamNextStartTime = 0;
+  for (const source of streamFallbackSources) {
+    try { source.stop(); } catch (e) {}
+  }
+  streamFallbackSources.clear();
+  streamFallbackNextStartTime = 0;
 }
 
 function stopStream() {
