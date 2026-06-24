@@ -82,7 +82,7 @@ class TestStreamingAudioSmoother:
         tail = smoother.flush()
 
         np.testing.assert_allclose(first, [0.0, 0.0])
-        np.testing.assert_allclose(second, [1.0, 0.0])
+        np.testing.assert_allclose(second, [1.0, 0.0, -0.0, -1.0])
         np.testing.assert_allclose(tail, [0.0, 0.0])
 
     def test_keeps_continuous_boundaries_unchanged(self):
@@ -95,6 +95,22 @@ class TestStreamingAudioSmoother:
         np.testing.assert_allclose(first, [0.0, 0.1])
         np.testing.assert_allclose(second, [0.2, 0.3, 0.31, 0.4])
         np.testing.assert_allclose(tail, [0.5, 0.6])
+
+    def test_preserves_total_samples_across_many_discontinuities(self):
+        smoother = StreamingAudioSmoother(crossfade_samples=2)
+        chunks = [
+            np.array([1.0, 1.0, -1.0, -1.0], dtype=np.float32)
+            if idx % 2
+            else np.array([-1.0, -1.0, 1.0, 1.0], dtype=np.float32)
+            for idx in range(200)
+        ]
+
+        outputs = [out for chunk in chunks if (out := smoother.push(chunk)) is not None]
+        tail = smoother.flush()
+        if tail is not None:
+            outputs.append(tail)
+
+        assert sum(output.size for output in outputs) == sum(chunk.size for chunk in chunks)
 
 
 # ---------------------------------------------------------------------------

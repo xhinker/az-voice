@@ -3,11 +3,11 @@
 import wave
 from pathlib import Path
 
+import numpy as np
 
-def encode_pcm_s16le(wav: "numpy.ndarray") -> bytes:
+
+def encode_pcm_s16le(wav: np.ndarray) -> bytes:
     """Encode mono float audio as raw little-endian signed 16-bit PCM."""
-    import numpy as np
-
     pcm = np.asarray(wav, dtype=np.float32).reshape(-1)
     pcm = np.nan_to_num(pcm, nan=0.0, posinf=1.0, neginf=-1.0)
     pcm = np.clip(pcm, -1.0, 1.0)
@@ -22,10 +22,8 @@ class StreamingAudioSmoother:
         self.discontinuity_threshold = discontinuity_threshold
         self._tail = None
 
-    def push(self, wav: "numpy.ndarray") -> "numpy.ndarray | None":
+    def push(self, wav: np.ndarray) -> np.ndarray | None:
         """Return audio that is safe to stream now, holding a short tail."""
-        import numpy as np
-
         chunk = np.asarray(wav, dtype=np.float32).reshape(-1)
         chunk = np.nan_to_num(chunk, nan=0.0, posinf=1.0, neginf=-1.0)
         chunk = np.clip(chunk, -1.0, 1.0)
@@ -40,27 +38,23 @@ class StreamingAudioSmoother:
                 return None
             return chunk[:-keep]
 
-        fade = min(self.crossfade_samples, self._tail.size, chunk.size)
+        emit = chunk[:-keep] if chunk.size > keep else chunk[:0]
+        output_tail = self._tail.copy()
         discontinuity = abs(float(self._tail[-1]) - float(chunk[0]))
 
-        if discontinuity >= self.discontinuity_threshold:
-            ramp = np.linspace(0.0, 1.0, fade, endpoint=False, dtype=np.float32)
-            joined = self._tail[-fade:] * (1.0 - ramp) + chunk[:fade] * ramp
-        else:
-            joined = np.concatenate([self._tail[-fade:], chunk[:fade]])
+        if discontinuity >= self.discontinuity_threshold and emit.size:
+            fade = min(self.crossfade_samples, output_tail.size, emit.size)
+            fade_out = np.linspace(1.0, 0.0, fade, endpoint=True, dtype=np.float32)
+            fade_in = np.linspace(0.0, 1.0, fade, endpoint=True, dtype=np.float32)
+            output_tail[-fade:] = output_tail[-fade:] * fade_out
+            emit = emit.copy()
+            emit[:fade] = emit[:fade] * fade_in
 
-        if discontinuity >= self.discontinuity_threshold:
-            if self._tail.size > fade:
-                output = np.concatenate([self._tail[:-fade], joined, chunk[fade:-keep]])
-            else:
-                output = np.concatenate([joined, chunk[fade:-keep]])
-        else:
-            output = np.concatenate([self._tail[:-fade], joined, chunk[fade:-keep]])
-
+        output = np.concatenate([output_tail, emit])
         self._tail = chunk[-keep:].copy()
         return output if output.size else None
 
-    def flush(self) -> "numpy.ndarray | None":
+    def flush(self) -> np.ndarray | None:
         """Return the final held tail."""
         tail = self._tail
         self._tail = None
