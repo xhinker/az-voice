@@ -141,6 +141,9 @@ def split_text_for_tts(
     if not clean:
         return []
 
+    # Clean full text BEFORE sentence splitting (URLs get broken at dots otherwise)
+    clean = _clean_segment(clean)
+
     sentence_pattern = rf"[^.!?。！？]+(?:[.!?。！？]+[{re.escape(_CLOSING_QUOTE_CHARS)}]*)?"
     sentences = [
         m.group(0).strip()
