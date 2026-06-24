@@ -3,8 +3,9 @@
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
-from az_voice.utils.audio_utils import concatenate_wavs
+from az_voice.utils.audio_utils import concatenate_wavs, encode_pcm_s16le
 
 
 # ---------------------------------------------------------------------------
@@ -22,6 +23,41 @@ def _make_test_wav(path, sample_rate=24000, duration_sec=1.0):
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(frames)
+
+
+# ---------------------------------------------------------------------------
+# encode_pcm_s16le — raw PCM conversion
+# ---------------------------------------------------------------------------
+
+class TestEncodePcmS16le:
+    def test_is_headerless_raw_audio(self):
+        audio = np.zeros(128, dtype=np.float32)
+
+        encoded = encode_pcm_s16le(audio)
+
+        assert len(encoded) == audio.size * 2
+        assert not encoded.startswith(b"RIFF")
+
+    def test_clips_and_sanitizes_samples(self):
+        audio = np.array(
+            [-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, np.nan, np.inf, -np.inf],
+            dtype=np.float32,
+        )
+
+        pcm = np.frombuffer(encode_pcm_s16le(audio), dtype="<i2")
+
+        assert pcm.tolist() == [
+            -32767,
+            -32767,
+            -16383,
+            0,
+            16383,
+            32767,
+            32767,
+            0,
+            32767,
+            -32767,
+        ]
 
 
 # ---------------------------------------------------------------------------

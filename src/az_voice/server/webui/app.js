@@ -216,12 +216,17 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// ── Streaming: collect chunks, play via AudioBufferSourceNode ─────────────────
+// ── Streaming: schedule PCM chunks on the Web Audio clock ─────────────────────
 let streamAudioCtx = null;
 let streamController = null;
-let streamBuffer = [];
-let streamPlaying = false;
-let streamSource = null;
+let streamSampleRate = 24000;
+let streamNextStartTime = 0;
+let streamSources = new Set();
+let streamTail = new Float32Array(0);
+
+const STREAM_INITIAL_DELAY_SEC = 0.08;
+const STREAM_RECOVERY_DELAY_SEC = 0.02;
+const STREAM_FADE_SAMPLES = 96;
 
 const streamBtn = document.getElementById('streamBtn');
 const stopStreamBtn = document.getElementById('stopStreamBtn');
@@ -257,9 +262,7 @@ async function startStream() {
   }
   if (streamAudioCtx.state === 'suspended') await streamAudioCtx.resume();
 
-  if (streamSource) { try { streamSource.stop(); } catch(e) {} streamSource = null; }
-  streamBuffer = [];
-  streamPlaying = false;
+  resetStreamPlayback();
 
   streamController = new AbortController();
   const payload = { model: 'voxcpm2', input: text };
@@ -292,17 +295,14 @@ async function startStream() {
         if (!line.startsWith('data: ')) continue;
         const data = JSON.parse(line.slice(6));
 
-        if (data.type === 'audio') {
-          const pcmBytes = Uint8Array.from(atob(data.data), c => c.charCodeAt(0));
-          const int16 = new Int16Array(pcmBytes.buffer);
-          const float32 = new Float32Array(int16.length);
-          for (let j = 0; j < int16.length; j++) float32[j] = int16[j] / 32768;
-          streamBuffer.push(float32);
+        if (data.type === 'metadata') {
+          if (data.sample_rate) streamSampleRate = data.sample_rate;
+        } else if (data.type === 'audio') {
+          const float32 = smoothChunkBoundary(decodePcm16(data.data));
+          queueStreamChunk(float32);
           chunkCount++;
           streamStatusText.textContent = 'Generating... (' + chunkCount + ' chunks)';
-          schedulePlayback();
         } else if (data.type === 'done') {
-          schedulePlayback();
           streamStatusText.textContent = 'Complete! (' + chunkCount + ' chunks)';
         } else if (data.type === 'error') {
           throw new Error(data.message);
@@ -325,37 +325,65 @@ async function startStream() {
   }
 }
 
-function schedulePlayback() {
-  if (streamPlaying || streamBuffer.length === 0) return;
+function decodePcm16(base64) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const samples = new Float32Array(bytes.byteLength / 2);
 
-  const totalLen = streamBuffer.reduce((s, c) => s + c.length, 0);
-  const merged = new Float32Array(totalLen);
-  let offset = 0;
-  for (const chunk of streamBuffer) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = view.getInt16(i * 2, true) / 32768;
   }
-  streamBuffer = [];
 
-  const audioBuf = streamAudioCtx.createBuffer(1, merged.length, streamAudioCtx.sampleRate);
-  audioBuf.getChannelData(0).set(merged);
+  return samples;
+}
 
-  streamPlaying = true;
-  streamSource = streamAudioCtx.createBufferSource();
-  streamSource.buffer = audioBuf;
-  streamSource.connect(streamAudioCtx.destination);
-  streamSource.onended = () => {
-    streamPlaying = false;
-    if (streamBuffer.length > 0) schedulePlayback();
-  };
-  streamSource.start();
+function smoothChunkBoundary(samples) {
+  const fade = Math.min(STREAM_FADE_SAMPLES, streamTail.length, samples.length);
+
+  if (fade > 0) {
+    const tailOffset = streamTail.length - fade;
+    for (let i = 0; i < fade; i++) {
+      const t = (i + 1) / (fade + 1);
+      samples[i] = streamTail[tailOffset + i] * (1 - t) + samples[i] * t;
+    }
+  }
+
+  streamTail = samples.slice(Math.max(0, samples.length - STREAM_FADE_SAMPLES));
+  return samples;
+}
+
+function queueStreamChunk(samples) {
+  if (!samples.length) return;
+
+  const audioBuf = streamAudioCtx.createBuffer(1, samples.length, streamSampleRate);
+  audioBuf.getChannelData(0).set(samples);
+
+  const source = streamAudioCtx.createBufferSource();
+  source.buffer = audioBuf;
+  source.connect(streamAudioCtx.destination);
+  source.onended = () => streamSources.delete(source);
+
+  const now = streamAudioCtx.currentTime;
+  const delay = streamNextStartTime === 0 ? STREAM_INITIAL_DELAY_SEC : STREAM_RECOVERY_DELAY_SEC;
+  const startAt = Math.max(streamNextStartTime, now + delay);
+
+  streamSources.add(source);
+  source.start(startAt);
+  streamNextStartTime = startAt + audioBuf.duration;
+}
+
+function resetStreamPlayback() {
+  for (const source of streamSources) {
+    try { source.stop(); } catch(e) {}
+  }
+  streamSources.clear();
+  streamNextStartTime = 0;
+  streamTail = new Float32Array(0);
 }
 
 function stopStream() {
   if (streamController) { streamController.abort(); streamController = null; }
-  if (streamSource) { try { streamSource.stop(); } catch(e) {} streamSource = null; }
-  streamBuffer = [];
-  streamPlaying = false;
+  resetStreamPlayback();
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────

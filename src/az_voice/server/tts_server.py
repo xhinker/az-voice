@@ -136,7 +136,7 @@ engine_manager: Optional[_EngineManager] = None
 async def handle_speech_stream(request: web.Request) -> web.Response:
     """Stream speech from text using Server-Sent Events.
     
-    Returns audio chunks as WAV-encoded SSE events for real-time playback.
+    Returns raw PCM audio chunks as SSE events for real-time playback.
     """
     try:
         body = await request.json()
@@ -192,11 +192,15 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
 
     try:
         import base64
-        import io
-        import soundfile as sf
+        from az_voice.utils.audio_utils import encode_pcm_s16le
 
         # Send metadata first
-        meta = json.dumps({"type": "metadata", "sample_rate": engine.sample_rate})
+        meta = json.dumps({
+            "type": "metadata",
+            "sample_rate": engine.sample_rate,
+            "encoding": "pcm_s16le",
+            "channels": 1,
+        })
         await response.write(("data: " + meta + "\n\n").encode())
 
         chunk_count = 0
@@ -208,13 +212,9 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
             cfg_value=cfg_value,
             inference_timesteps=inference_timesteps,
         ):
-            # Encode chunk as WAV
-            buf = io.BytesIO()
-            sf.write(buf, chunk, engine.sample_rate, format="WAV")
-            wav_bytes = buf.getvalue()
-
-            # Base64 encode for SSE transport
-            encoded = base64.b64encode(wav_bytes).decode('ascii')
+            # Encode raw PCM. Wrapping every chunk in WAV adds a RIFF header that
+            # the browser streaming path would otherwise play as a click.
+            encoded = base64.b64encode(encode_pcm_s16le(chunk)).decode('ascii')
             event = json.dumps({"type": "audio", "chunk": chunk_count, "data": encoded})
             await response.write(("data: " + event + "\n\n").encode())
             chunk_count += 1

@@ -1,7 +1,17 @@
-"""Audio file utilities: WAV concatenation."""
+"""Audio utilities for WAV files and PCM conversion."""
 
 import wave
 from pathlib import Path
+
+
+def encode_pcm_s16le(wav: "numpy.ndarray") -> bytes:
+    """Encode mono float audio as raw little-endian signed 16-bit PCM."""
+    import numpy as np
+
+    pcm = np.asarray(wav, dtype=np.float32).reshape(-1)
+    pcm = np.nan_to_num(pcm, nan=0.0, posinf=1.0, neginf=-1.0)
+    pcm = np.clip(pcm, -1.0, 1.0)
+    return (pcm * 32767.0).astype("<i2", copy=False).tobytes()
 
 
 def concatenate_wavs(
@@ -59,4 +69,4 @@ def concatenate_wavs(
     return out
 
 
-__all__ = ["concatenate_wavs"]
+__all__ = ["concatenate_wavs", "encode_pcm_s16le"]
