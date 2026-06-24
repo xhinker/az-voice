@@ -126,6 +126,46 @@ class _EngineManager:
 
 
 # WebUI static files path
+def _decode_reference_wav(ref_wav):
+    """Decode reference_wav: if base64 data URI, save to temp WAV file; else return as-is."""
+    if ref_wav and ref_wav.startswith("data:audio"):
+        import base64
+        import tempfile
+        import wave
+        import numpy as np
+        import torchaudio
+        
+        # Extract MIME type and base64 data
+        header, data = ref_wav.split(",", 1)
+        mime = header.split(";")[0].split(":")[1]  # e.g. "audio/wav", "audio/mpeg"
+        audio_bytes = base64.b64decode(data)
+        
+        # Save raw bytes with correct extension for torchaudio to detect
+        ext_map = {
+            "audio/wav": ".wav",
+            "audio/mpeg": ".mp3",
+            "audio/mp3": ".mp3",
+            "audio/ogg": ".ogg",
+            "audio/flac": ".flac",
+            "audio/x-wav": ".wav",
+        }
+        ext = ext_map.get(mime, ".wav")
+        
+        # Load with torchaudio (auto-detects format) and re-encode as WAV
+        waveform, sr = torchaudio.load(io.BytesIO(audio_bytes))
+        # Convert to mono if stereo
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        # Normalize to [-1, 1]
+        waveform = waveform.float()
+        
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        torchaudio.save(tmp.name, waveform, sr, format="wav")
+        tmp.close()
+        return tmp.name
+    return ref_wav
+
+
 _WEBUI_DIR = Path(__file__).parent / 'webui'
 
 engine_manager: Optional[_EngineManager] = None
@@ -156,7 +196,7 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
 
     model = body.get("model", DEFAULT_MODEL)
     speed = float(body.get("speed", 1.0))
-    reference_wav = body.get("reference_wav")
+    reference_wav = _decode_reference_wav(body.get("reference_wav"))
     reference_text = body.get("reference_text")
     control_instruction = body.get("control_instruction")
     cfg_value = float(body.get("cfg_value", 2.0))
@@ -298,7 +338,7 @@ async def handle_speech(request: web.Request) -> web.Response:
     response_format = body.get("response_format", "mp3")
     speed = float(body.get("speed", 1.0))
 
-    reference_wav = body.get("reference_wav")
+    reference_wav = _decode_reference_wav(body.get("reference_wav"))
     reference_text = body.get("reference_text")
     control_instruction = body.get("control_instruction")
     cfg_value = float(body.get("cfg_value", 2.0))

@@ -94,6 +94,15 @@ speedRange.addEventListener('input', () => {
 // ── Generate ───────────────────────────────────────────────────────────────────
 generateBtn.addEventListener('click', generate);
 
+async function fileToDataUri(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 async function generate() {
   const text = textInput.value.trim();
   if (!text) {
@@ -123,6 +132,14 @@ async function generate() {
 
   const style = styleInput.value.trim();
   if (style) payload.control_instruction = style;
+
+  // Reference audio
+  const refAudioFile = refAudioInput.files[0];
+  if (refAudioFile) {
+    payload.reference_wav = await fileToDataUri(refAudioFile);
+    const refText = refTextInput.value.trim();
+    if (refText) payload.reference_text = refText;
+  }
 
   try {
     const startTime = Date.now();
@@ -268,6 +285,14 @@ async function startStream() {
   const payload = { model: 'voxcpm2', input: text };
   const style = streamStyleInput.value.trim();
   if (style) payload.control_instruction = style;
+
+  // Reference audio
+  const streamRefAudioFile = streamRefAudioInput.files[0];
+  if (streamRefAudioFile) {
+    payload.reference_wav = await fileToDataUri(streamRefAudioFile);
+    const streamRefText = streamRefTextInput.value.trim();
+    if (streamRefText) payload.reference_text = streamRefText;
+  }
 
   try {
     const resp = await fetch('/v1/audio/speech/stream', {

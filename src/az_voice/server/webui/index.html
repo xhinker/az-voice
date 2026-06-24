@@ -49,6 +49,16 @@
           <label for="styleInput">Style (optional)</label>
           <input type="text" id="styleInput" placeholder='e.g. "speaking slowly, happy tone"'>
         </div>
+
+        <div class="control-group wide">
+          <label for="refAudioInput">Reference Audio (optional)</label>
+          <input type="file" id="refAudioInput" accept="audio/*">
+        </div>
+
+        <div class="control-group wide">
+          <label for="refTextInput">Reference Text (optional)</label>
+          <textarea id="refTextInput" placeholder="Transcript of reference audio..." rows="2"></textarea>
+        </div>
       </div>
 
       <div class="actions">
@@ -84,6 +94,16 @@
         <div class="control-group wide">
           <label for="streamStyleInput">Style (optional)</label>
           <input type="text" id="streamStyleInput" placeholder='e.g. "speaking slowly, happy tone"'>
+        </div>
+
+        <div class="control-group wide">
+          <label for="streamRefAudioInput">Reference Audio (optional)</label>
+          <input type="file" id="streamRefAudioInput" accept="audio/*">
+        </div>
+
+        <div class="control-group wide">
+          <label for="streamRefTextInput">Reference Text (optional)</label>
+          <textarea id="streamRefTextInput" placeholder="Transcript of reference audio..." rows="2"></textarea>
         </div>
       </div>
 
@@ -129,6 +149,6 @@
     </footer>
   </div>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=28"></script>
 </body>
 </html>
