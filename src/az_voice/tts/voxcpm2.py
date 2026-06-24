@@ -142,7 +142,7 @@ class VoxCPM2Engine:
                     kwargs["text"] = f"({control_instruction}){seg_text}"
                 kwargs["reference_wav_path"] = reference_wav
 
-            print(f"Streaming segment {seg_idx + 1}/{len(segments)}: {seg_text[:60]}...")
+            print(f"Streaming segment {seg_idx + 1}/{len(segments)}: {seg_text}")
 
             with torch.inference_mode():
                 for chunk in self._model.generate_streaming(**kwargs):
@@ -226,6 +226,7 @@ class VoxCPM2Engine:
                     kwargs["text"] = f"({control_instruction}){segment}"
                 kwargs["reference_wav_path"] = reference_wav
 
+            print(f"  Segment {i}/{len(segments)}: {segment}")
             # Generate chunk (inference mode: no gradients, less VRAM)
             with torch.inference_mode():
                 wav = self._model.generate(**kwargs)
