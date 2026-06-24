@@ -309,12 +309,13 @@ async function startStream() {
 
         if (data.type === 'audio') {
           const pcmBytes = Uint8Array.from(atob(data.data), c => c.charCodeAt(0));
-          const samples = new Int16Array(pcmBytes.buffer);
+          const int16 = new Int16Array(pcmBytes.buffer);
+          const float32 = new Float32Array(int16.length);
+          for (let j = 0; j < int16.length; j++) float32[j] = int16[j] / 32768;
           if (useWorklet && streamWorkletNode) {
-            streamWorkletNode.port.postMessage({ type: 'pcm', samples: samples });
+            streamWorkletNode.port.postMessage({ type: 'pcm', samples: float32 });
           } else {
-            // Fallback: queue and play via ScriptProcessor
-            playPcmFallback(samples);
+            playPcmFallback(float32);
           }
           chunkCount++;
           streamStatusText.textContent = 'Streaming... (' + chunkCount + ' chunks)';
@@ -342,21 +343,42 @@ async function startStream() {
   }
 }
 
-// Fallback playback using ScriptProcessor (for browsers without AudioWorklet)
+// Fallback playback - ring buffer with proper tail tracking for crossfade
 let fallbackProcessor = null;
 let fallbackQueue = [];
+let fallbackReadPos = 0;
+let fallbackTail = [];  // Last 64 samples actually played (for crossfade)
+const CF = 64;  // crossfade length
 
 function playPcmFallback(samples) {
-  fallbackQueue.push(...samples);
+  // Crossfade: blend first CF samples with tail of previously PLAYED audio
+  if (fallbackTail.length >= CF && samples.length > CF) {
+    for (let i = 0; i < CF; i++) {
+      const t = (i + 1) / (CF + 1);
+      samples[i] = fallbackTail[Math.max(0, fallbackTail.length - CF + i)] * (1 - t) + samples[i] * t;
+    }
+  }
+  // Update tail with new samples
+  fallbackTail = Array.from(samples);
+  Array.prototype.push.apply(fallbackQueue, samples);
   
   if (!fallbackProcessor) {
-    // Create ScriptProcessor (deprecated but widely supported)
-    fallbackProcessor = streamAudioCtx.createScriptProcessor(4096, 0, 1);
+    fallbackProcessor = streamAudioCtx.createScriptProcessor(2048, 0, 1);
     fallbackProcessor.onaudioprocess = (e) => {
-      const output = e.outputBuffer.getChannelData(0);
-      for (let i = 0; i < output.length; i++) {
-        output[i] = fallbackQueue.length > 0 ? fallbackQueue.shift() / 32768 : 0;
+      const out = e.outputBuffer.getChannelData(0);
+      const avail = fallbackQueue.length - fallbackReadPos;
+      const copy = Math.min(out.length, avail);
+      for (let i = 0; i < copy; i++) out[i] = fallbackQueue[fallbackReadPos + i];
+      // If queue runs dry, fade to silence smoothly
+      if (copy < out.length) {
+        const fadeLen = Math.min(64, out.length - copy);
+        for (let i = 0; i < fadeLen; i++) {
+          out[copy + i] = (copy > 0 ? out[copy - 1] : 0) * (1 - i / fadeLen);
+        }
+        out.fill(0, copy + fadeLen);
       }
+      fallbackReadPos += copy;
+      if (fallbackReadPos > 65536) { fallbackQueue = fallbackQueue.slice(fallbackReadPos); fallbackReadPos = 0; }
     };
     fallbackProcessor.connect(streamAudioCtx.destination);
   }

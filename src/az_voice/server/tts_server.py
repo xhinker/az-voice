@@ -223,10 +223,15 @@ async def handle_speech_stream(request: web.Request) -> web.Response:
         done = json.dumps({"type": "done", "total_chunks": chunk_count})
         await response.write(("data: " + done + "\n\n").encode())
 
+    except (ConnectionResetError, BrokenPipeError) as exc:
+        logger.info("Client disconnected during streaming")
     except Exception as exc:
         logger.error("Streaming failed: %s", exc, exc_info=True)
-        err = json.dumps({"type": "error", "message": str(exc)})
-        await response.write(("data: " + err + "\n\n").encode())
+        try:
+            err = json.dumps({"type": "error", "message": str(exc)})
+            await response.write(("data: " + err + "\n\n").encode())
+        except Exception:
+            pass  # Client already disconnected
 
     return response
 
