@@ -75,6 +75,38 @@ def _estimate_seconds(piece: str) -> float:
     return max(words / 1.8, non_space_chars / 10.0)
 
 
+def _clean_segment(text: str) -> str:
+    """Clean up spaces in text segments.
+
+    1. Remove spaces between CJK characters (e.g., "阿凯笛亚 庄园" -> "阿凯笛亚庄园")
+    2. Remove spaces within URL/noise fragments embedded in CJK text
+       (e.g., "ww w . xiaoshuotxt.co m" -> "www.xiaoshuotxt.com")
+    """
+    import re
+
+    # Rule 0: remove HTML entities like &laquo; &raquo; &nbsp; &mdash; etc.
+    text = re.sub(r"&[a-zA-Z0-9]+;", "", text)
+    text = re.sub(r"&#\d+;", "", text)
+    text = re.sub(r"&#x[0-9a-fA-F]+;", "", text)
+
+    # Rule 1: remove spaces between CJK characters
+    text = re.sub(r"([㐀-䶿一-鿿豈-﫿])\s+([㐀-䶿一-鿿豈-﫿])", r"\1\2", text)
+
+    # Rule 2: remove spaces within Latin fragments containing URL-like chars
+    # Match a run of Latin letters/digits separated by spaces/dots, bounded by non-Latin
+    def _clean_fragment(m):
+        fragment = m.group(0)
+        no_space = re.sub(r"[\s\u3000]+", "", fragment)
+        # Only remove spaces if fragment contains URL-like chars
+        if any(c in no_space for c in "./-_"):
+            return no_space
+        return fragment
+
+    text = re.sub(r"(?<![a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9.\s\u3000-]*[a-zA-Z0-9](?![a-zA-Z])", _clean_fragment, text)
+
+    return text
+
+
 def split_text_for_tts(
     text: str,
     max_words: int = DEFAULT_MAX_WORDS,
@@ -219,7 +251,7 @@ def split_text_for_tts(
                 current = candidate
 
     flush_current()
-    segments = [closed for segment in segments if (closed := _close_segment(segment))]
+    segments = [closed for segment in segments if (closed := _close_segment(_clean_segment(segment)))]
     return segments if segments else [_close_segment(clean)]
 
 
