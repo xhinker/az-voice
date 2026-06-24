@@ -516,6 +516,8 @@ def _serve_command(args):
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Disable aiohttp access logs (breaks progress bars from HF downloads)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
     app = create_app(device=args.device, cache_dir=args.cache_dir)
     

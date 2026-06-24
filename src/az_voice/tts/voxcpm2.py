@@ -101,11 +101,12 @@ class VoxCPM2Engine:
     ):
         """Generate audio from text, yielding chunks as they become available.
 
-        Uses VoxCPM2's native generate_streaming() for real-time audio output.
-        Each yielded chunk is a numpy array of audio samples.
+        Long text is split into segments (same as batch mode) to stay within
+        the model's ~8192 token context window. Each segment is streamed via
+        VoxCPM2's native generate_streaming().
 
         Args:
-            text: Text to synthesize.
+            text: Text to synthesize (unlimited length).
             reference_wav: Path to reference audio for cloning.
             reference_text: Transcript of reference audio.
             control_instruction: Style control instruction.
@@ -121,25 +122,31 @@ class VoxCPM2Engine:
         if not self.is_loaded:
             raise RuntimeError("Model not loaded. Did you forget to call engine.load_model()?")
 
-        kwargs = {
-            "text": text,
-            "cfg_value": cfg_value,
-            "inference_timesteps": inference_timesteps,
-        }
+        from az_voice.utils.text_chunker import split_text_for_tts
 
-        if reference_wav is not None and reference_text is not None:
-            kwargs["prompt_wav_path"] = reference_wav
-            kwargs["prompt_text"] = reference_text
-        elif reference_wav is not None:
-            if control_instruction is not None:
-                kwargs["text"] = f"({control_instruction}){text}"
-            kwargs["reference_wav_path"] = reference_wav
+        # Chunk long text to stay within model context window
+        segments = split_text_for_tts(text, max_words=28, target_seconds=12.0)
 
-        print(f"Streaming: {text[:80]}...")
+        for seg_idx, seg_text in enumerate(segments):
+            kwargs = {
+                "text": seg_text,
+                "cfg_value": cfg_value,
+                "inference_timesteps": inference_timesteps,
+            }
 
-        with torch.inference_mode():
-            for chunk in self._model.generate_streaming(**kwargs):
-                yield chunk
+            if reference_wav is not None and reference_text is not None:
+                kwargs["prompt_wav_path"] = reference_wav
+                kwargs["prompt_text"] = reference_text
+            elif reference_wav is not None:
+                if control_instruction is not None:
+                    kwargs["text"] = f"({control_instruction}){seg_text}"
+                kwargs["reference_wav_path"] = reference_wav
+
+            print(f"Streaming segment {seg_idx + 1}/{len(segments)}: {seg_text[:60]}...")
+
+            with torch.inference_mode():
+                for chunk in self._model.generate_streaming(**kwargs):
+                    yield chunk
 
         clear_vram()
 
