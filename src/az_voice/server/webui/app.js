@@ -222,11 +222,11 @@ let streamController = null;
 let streamSampleRate = 24000;
 let streamNextStartTime = 0;
 let streamSources = new Set();
-let streamTail = new Float32Array(0);
+let streamLastSample = null;
 
-const STREAM_INITIAL_DELAY_SEC = 0.08;
+const STREAM_INITIAL_DELAY_SEC = 0.18;
 const STREAM_RECOVERY_DELAY_SEC = 0.02;
-const STREAM_FADE_SAMPLES = 96;
+const STREAM_DECLICK_SAMPLES = 128;
 
 const streamBtn = document.getElementById('streamBtn');
 const stopStreamBtn = document.getElementById('stopStreamBtn');
@@ -338,17 +338,18 @@ function decodePcm16(base64) {
 }
 
 function smoothChunkBoundary(samples) {
-  const fade = Math.min(STREAM_FADE_SAMPLES, streamTail.length, samples.length);
+  if (!samples.length) return samples;
 
-  if (fade > 0) {
-    const tailOffset = streamTail.length - fade;
+  if (streamLastSample !== null) {
+    const fade = Math.min(STREAM_DECLICK_SAMPLES, samples.length);
+    const offset = streamLastSample - samples[0];
     for (let i = 0; i < fade; i++) {
-      const t = (i + 1) / (fade + 1);
-      samples[i] = streamTail[tailOffset + i] * (1 - t) + samples[i] * t;
+      const t = i / fade;
+      samples[i] += offset * (1 - t);
     }
   }
 
-  streamTail = samples.slice(Math.max(0, samples.length - STREAM_FADE_SAMPLES));
+  streamLastSample = samples[samples.length - 1];
   return samples;
 }
 
@@ -359,13 +360,28 @@ function queueStreamChunk(samples) {
   audioBuf.getChannelData(0).set(samples);
 
   const source = streamAudioCtx.createBufferSource();
+  const gain = streamAudioCtx.createGain();
   source.buffer = audioBuf;
-  source.connect(streamAudioCtx.destination);
+  source.connect(gain);
+  gain.connect(streamAudioCtx.destination);
   source.onended = () => streamSources.delete(source);
 
   const now = streamAudioCtx.currentTime;
-  const delay = streamNextStartTime === 0 ? STREAM_INITIAL_DELAY_SEC : STREAM_RECOVERY_DELAY_SEC;
-  const startAt = Math.max(streamNextStartTime, now + delay);
+  const isFirstChunk = streamNextStartTime === 0;
+  const underrun = !isFirstChunk && streamNextStartTime <= now;
+  const startAt = isFirstChunk
+    ? now + STREAM_INITIAL_DELAY_SEC
+    : underrun
+      ? now + STREAM_RECOVERY_DELAY_SEC
+      : streamNextStartTime;
+
+  if (isFirstChunk || underrun) {
+    const fadeSec = STREAM_DECLICK_SAMPLES / streamSampleRate;
+    gain.gain.setValueAtTime(0, startAt);
+    gain.gain.linearRampToValueAtTime(1, startAt + fadeSec);
+  } else {
+    gain.gain.setValueAtTime(1, startAt);
+  }
 
   streamSources.add(source);
   source.start(startAt);
@@ -378,7 +394,7 @@ function resetStreamPlayback() {
   }
   streamSources.clear();
   streamNextStartTime = 0;
-  streamTail = new Float32Array(0);
+  streamLastSample = null;
 }
 
 function stopStream() {
