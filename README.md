@@ -1,22 +1,18 @@
 # az-voice
 
-> **VoxCPM2 is one of the best open-source text-to-speech models available. The quality is impressive. The bilingual support is real.**
->
-> Try using it directly and you'll hit walls fast. Feed it a paragraph longer than a few sentences and it breaks — the model has an 8192-token context window. Paste in reference audio for voice cloning and you'll fight with file formats and tensor shapes. Want streaming? The model yields numpy arrays, not HTTP responses. Need an API? Write it yourself.
->
-> **The model is the easy part. Everything around it is not.**
->
-> That's what az-voice solves. It takes VoxCPM2 from "works in a Colab notebook" to "works in production" — with five pieces that the base model doesn't provide. [Read the full story on Medium](https://medium.com/p/974b371b1a64)
-
 Text-to-speech (TTS) toolkit powered by [VoxCPM2](https://github.com/OpenBMB/VoxCPM) with bilingual (English + Chinese) support.
 
-### The Five Pieces az-voice Adds
+VoxCPM2 is one of the best open-source TTS models — but using it directly is painful. Feed it long text and it breaks at the 8192-token limit. Want voice cloning? Fight with file formats and tensor shapes. Need streaming? The model yields numpy arrays, not HTTP responses.
 
-1. **Text Splitting That Doesn't Break Sentences** — Knows the difference between Chinese and English, splits at sentence boundaries, merges greedily to target duration (default 15s).
-2. **Streaming Without Blips** — Raw PCM with no WAV headers, plus a smoother that detects discontinuities and crossfades only when needed.
-3. **A TTS Library You Can Actually Import** — Engine class handles loading, device placement, VRAM cleanup, format conversion, and fixed-seed continuation for voice cloning across segments.
-4. **An OpenAI-Compatible API** — Drop-in compatible with OpenAI's `/v1/audio/speech` endpoint. Swap the base URL and your code works.
-5. **A Web UI That Just Works** — Dark theme, batch and streaming tabs, reference audio upload. No build step, no npm, no framework.
+**az-voice fills the gaps the base model leaves open:**
+
+1. **Text Splitting** — Splits long English/Chinese text at sentence boundaries, merges to target duration (15s default), handles mixed-language content.
+2. **Streaming Without Blips** — Raw PCM via SSE, with a smoother that crossfades only when discontinuities are detected.
+3. **Library Wrapper** — Engine class handles loading, device placement, VRAM cleanup, format conversion, and prompt cache reuse for voice cloning.
+4. **OpenAI-Compatible API** — Drop-in replacement for `/v1/audio/speech`. Swap the base URL and your code works.
+5. **Web UI** — Dark theme, batch and streaming tabs, reference audio upload. No build step, no npm.
+
+[Read the full story on Medium](https://medium.com/p/974b371b1a64)
 
 ## Features
 
