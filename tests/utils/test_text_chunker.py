@@ -81,6 +81,10 @@ class TestCloseSegment:
         result = _close_segment("Hello world, you are great")
         assert not result.endswith(",") and (result[-1] in ".!?。！？")
 
+    def test_mixed_ascii_cjk_terminal_collapsed(self):
+        text = "A wooden door with a brass handle, and above it, a sign that simply read, come in.。"
+        assert _close_segment(text) == text[:-1]
+
     def test_empty_input(self):
         assert _close_segment("") == ""
 
@@ -145,6 +149,16 @@ class TestSplitTextEnglish:
         result = split_text_for_tts(text)
         combined = "".join(result)
         assert "?" in combined or "!?" not in combined  # At least some punctuation preserved
+
+    def test_english_sentence_before_newline_does_not_gain_cjk_period(self):
+        text = (
+            "A wooden door with a brass handle, and above it, "
+            "a sign that simply read, come in.\n"
+            "Inside, the shelves stretched impossibly high."
+        )
+        combined = " ".join(split_text_for_tts(text))
+        assert "come in.。" not in combined
+        assert "come in." in combined
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +411,15 @@ class TestCleanSegmentPreservation:
     def test_normal_english(self):
         result = _clean_segment("Hello world, this is a test.")
         assert "Hello world" in result
+
+    def test_tld_substring_in_normal_word_preserved(self):
+        text = (
+            "Leyla left the book on the shelf, walked out the door, "
+            "and never forgot the life she had instead of the one she almost had."
+        )
+        result = _clean_segment(text)
+        assert result == text
+        assert split_text_for_tts(text) == [text]
 
     def test_mixed_normal(self):
         result = _clean_segment("Hello 你好世界 How are you")

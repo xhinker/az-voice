@@ -50,6 +50,11 @@ def _close_segment(piece: str) -> str:
 
     if not normalized:
         return suffix
+    # Newlines are converted to Chinese full stops before splitting. If an
+    # English sentence already ended with punctuation, this can create mixed
+    # endings like ".。"; collapse them back to one terminal mark.
+    normalized = re.sub(r"([.!?])[。！？]+$", r"\1", normalized)
+    normalized = re.sub(r"([。！？])[.!?]+$", r"\1", normalized)
     if normalized[-1] in _TERMINAL_PUNCT_CHARS:
         return normalized + suffix
     if normalized[-1] in _WEAK_PUNCT_CHARS:
@@ -103,8 +108,18 @@ def _clean_segment(text: str) -> str:
 
     # Rule 2: remove URL patterns
     _tlds = r"(?:com|net|org|cn|edu|gov|io|biz|info|xyz|site|top|cc|tv|me)"
-    # URLs with TLD: e.g., "site.com", "ww w . site . com"
-    text = re.sub(r"(?i)[a-zA-Z0-9][a-zA-Z0-9\s.:/-]{2,}" + _tlds + r"\s*", "", text)
+    # Explicit protocol URLs and real dotted domains. Keep this narrow: the
+    # previous pattern did not require a dot and ate normal words like "forgot"
+    # because they contain a TLD substring ("org").
+    text = re.sub(r"(?i)https?://[^\s\u3000，。！？；、]+", "", text)
+    text = re.sub(
+        r"(?i)(?<![a-zA-Z0-9])"
+        r"[a-zA-Z0-9][a-zA-Z0-9-]*(?:[\s\u3000]*\.[\s\u3000]*[a-zA-Z0-9][a-zA-Z0-9-]*)*"
+        r"[\s\u3000]*\.[\s\u3000]*" + _tlds +
+        r"(?:/[a-zA-Z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?",
+        "",
+        text,
+    )
     # www. prefixed: e.g., "www.xiaoshuotxt", "ww w . xiaoshuotxt"
     text = re.sub(r"(?i)w[\s\u3000]*w[\s\u3000]*w[\s\u3000]*[.\s\u3000]+[a-zA-Z0-9][a-zA-Z0-9\s.\-]*", "", text)
     # Multi-dot domains: segments must end at non-alnum (not partial words)
@@ -146,8 +161,12 @@ def split_text_for_tts(
     # Clean full text BEFORE sentence splitting (URLs get broken at dots otherwise)
     clean = _clean_segment(clean)
 
-    # Collapse consecutive terminal punctuation (after URL removal may create "。。")
+    # Collapse consecutive terminal punctuation (after URL removal may create "。。").
+    # Also normalize mixed ASCII/CJK endings created by newline conversion, e.g.
+    # "come in.\n" -> "come in.。" -> "come in.".
     import re as _re
+    clean = _re.sub(r"([.!?])[。！？]+", r"\1", clean)
+    clean = _re.sub(r"([。！？])[.!?]+", r"\1", clean)
     clean = _re.sub(r"[。！？]{2,}", lambda m: m.group(0)[0], clean)
 
     sentence_pattern = rf"[^.!?。！？]+(?:[.!?。！？]+[{re.escape(_CLOSING_QUOTE_CHARS)}]*)?"
